@@ -1,0 +1,10 @@
+# 物理名称 -> PLC 变量映射
+mappings:
+  水位设定值:
+    variable: MAIN.setpoint
+    type: REAL
+    description: 水箱水位设定值
+  液面高度:
+    variable: MAIN.IN
+    type: INT
+    description: 实际液面高度
