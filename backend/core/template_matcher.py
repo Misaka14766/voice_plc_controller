@@ -1,6 +1,6 @@
 import re
 from typing import Dict, Optional, Tuple, Any
-from config.settings import settings
+from backend.config import settings
 
 class TemplateMatcher:
     """基于物理名称映射的快速 PLC 操作"""

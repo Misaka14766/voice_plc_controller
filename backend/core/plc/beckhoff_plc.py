@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pyads
 from pyads.constants import PLCTYPE_INT, PLCTYPE_BOOL, PLCTYPE_REAL, PLCTYPE_STRING
 from .base import BasePLC
-from config.settings import settings
+from backend.config import settings
 
 class BeckhoffPLC(BasePLC):
     def __init__(self):

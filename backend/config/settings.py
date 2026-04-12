@@ -14,10 +14,20 @@ class Settings:
     ASR_MODEL = os.getenv("ASR_MODEL", "paraformer-zh-streaming")
     ASR_DEVICE = os.getenv("ASR_DEVICE", "cpu")
 
-    # FunASR 流式参数（对齐官方示例，可通过环境变量覆盖）
+    # FunASR 流式参数
     ASR_CHUNK_SIZE_STR = os.getenv("ASR_CHUNK_SIZE", "0,10,5")
     ASR_ENCODER_CHUNK_LOOK_BACK = int(os.getenv("ASR_ENCODER_CHUNK_LOOK_BACK", "4"))
     ASR_DECODER_CHUNK_LOOK_BACK = int(os.getenv("ASR_DECODER_CHUNK_LOOK_BACK", "1"))
+
+    # 阿里云 ASR 配置（支持 AK/SK 动态获取 Token）
+    ALIYUN_ASR_APPKEY = os.getenv("ALIYUN_ASR_APPKEY", "")
+    ALIYUN_AK_ID = os.getenv("ALIYUN_AK_ID", "")
+    ALIYUN_AK_SECRET = os.getenv("ALIYUN_AK_SECRET", "")
+    ALIYUN_ASR_URL = os.getenv("ALIYUN_ASR_URL", "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1")
+    ALIYUN_ASR_REGION = os.getenv("ALIYUN_ASR_REGION", "cn-shanghai")
+
+    # 兼容旧版 Token 直接配置（优先级低于 AK/SK）
+    ALIYUN_ASR_TOKEN = os.getenv("ALIYUN_ASR_TOKEN", "")
 
     @property
     def asr_chunk_size(self) -> list:

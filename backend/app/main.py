@@ -3,13 +3,13 @@ import logging
 import sys
 from typing import Optional
 
-from config.settings import settings
-from core import get_asr, get_tts, get_llm, get_plc
-from core.llm.openai_llm import set_plc_instance
-from core.template_matcher import TemplateMatcher
-from utils.audio_recorder import AudioRecorder
-from utils.key_trigger import KeyTrigger
-from utils.logger import setup_logging
+from backend.config.settings import settings
+from backend.core import get_asr, get_tts, get_llm, get_plc
+from backend.core.llm.openai_llm import set_plc_instance
+from backend.core.template_matcher import TemplateMatcher
+from backend.utils.audio_recorder import AudioRecorder
+from backend.utils.key_trigger import KeyTrigger
+from backend.utils.logger import setup_logging
 
 # 初始化彩色日志
 setup_logging()
@@ -186,9 +186,13 @@ class VoiceApp:
                     val = parts[2].lower()
                     if val in ("on", "true", "1"):
                         self.runtime_voice_input_enabled = True
+                        if self.asr:
+                            self.asr.start()  # 启动长连接
                         print("✅ 语音输入已开启")
                     elif val in ("off", "false", "0"):
                         self.runtime_voice_input_enabled = False
+                        if self.asr:
+                            self.asr.stop()  # 关闭长连接
                         print("🔇 语音输入已关闭")
                     else:
                         print("无效参数，请使用 on 或 off")

@@ -1,7 +1,7 @@
 import numpy as np
 from funasr import AutoModel
 from .base import BaseASR
-from config.settings import settings
+from backend.config import settings
 import logging
 
 logger = logging.getLogger(__name__)

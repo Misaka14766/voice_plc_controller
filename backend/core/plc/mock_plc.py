@@ -3,7 +3,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from .base import BasePLC
-from config.settings import settings
+
 
 class MockPLC(BasePLC):
     def __init__(self):

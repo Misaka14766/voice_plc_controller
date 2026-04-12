@@ -4,7 +4,7 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, AIMessage
 
 from .base import BaseLLM, LLMResponse
-from config.settings import settings
+from backend.config import settings
 
 _plc_instance = None
 

@@ -1,6 +1,6 @@
 import logging
 import colorlog
-from config.settings import settings
+from backend.config import settings
 
 def setup_logging():
     """配置彩色日志"""

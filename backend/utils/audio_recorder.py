@@ -48,7 +48,7 @@
 
 import pyaudio
 import queue
-from config.settings import settings
+from backend.config import settings
 
 class AudioRecorder:
     def __init__(self):
