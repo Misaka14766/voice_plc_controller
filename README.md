@@ -40,44 +40,46 @@ pip install -r requirements.txt
 复制 `backend/.env.example` 文件为 `backend/.env` 并填写相关配置：
 
 ```env
-# ASR 提供商 (funasr 或 aliyun)
+# ASR 配置
 ASR_PROVIDER=aliyun
 ASR_SAMPLE_RATE=16000
+ASR_TRIGGER_KEY=ctrl_r
 
 # 阿里云 ASR 配置
-ALIYUN_ACCESS_KEY=your_access_key
-ALIYUN_ACCESS_KEY_SECRET=your_access_key_secret
-ALIYUN_APP_KEY=your_app_key
+ALIYUN_ASR_APPKEY=your_appkey
+ALIYUN_AK_ID=your_access_key_id
+ALIYUN_AK_SECRET=your_access_key_secret
+ALIYUN_ASR_URL=wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1
 
-# TTS
+# TTS 配置
 TTS_PROVIDER=edge
 TTS_VOICE=zh-CN-XiaoxiaoNeural
 TTS_VOLUME=0.8
+TTS_PLAYER=pygame
 
-# LLM (DeepSeek 示例)
+# LLM 配置
 LLM_PROVIDER=openai
-LLM_MODEL=deepseek-chat
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://api.deepseek.com/v1
 LLM_TEMPERATURE=0.7
 LLM_MAX_TOKENS=1024
 
-# PLC
+# ARK 配置（示例）
+#LLM_MODEL=doubao-1-5-pro-32k-250115
+#LLM_API_KEY=your_api_key
+#LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+
+# PLC 配置
 PLC_ENABLED=false
 PLC_PROVIDER=mock
 PLC_AMS_NET_ID=192.168.1.1.1.1
 PLC_AMS_PORT=851
-PLC_IP_ADDRESS=192.168.1.100
-
-# 按键
-TRIGGER_KEY=ctrl_r
-
-# 交互模式
-VOICE_INPUT_ENABLED=true
-VOICE_OUTPUT_ENABLED=true
+PLC_TRIGGER_VAR=MAIN.bVoiceTrigger
 
 # 模板匹配
 USE_TEMPLATE_MATCHING=true
+
+# 交互开关
+VOICE_INPUT_ENABLED=true
+VOICE_OUTPUT_ENABLED=true
 
 # 日志
 LOG_LEVEL=INFO
@@ -165,6 +167,13 @@ voice_plc_controller/
 │   │   ├── plc/          # PLC 通信
 │   │   ├── tts/          # 语音合成
 │   │   │   ├── players/  # 音频播放器
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── base.py
+│   │   │   │   ├── factory.py
+│   │   │   │   ├── pygame_player.py
+│   │   │   │   └── system_player.py
+│   │   │   ├── __init__.py
+│   │   │   ├── base.py
 │   │   │   └── edge_tts.py  # Edge TTS
 │   │   ├── __init__.py
 │   │   ├── factory.py    # 工厂模式
@@ -218,9 +227,10 @@ MONITOR_INTERVAL_MS=200
 
 ```env
 ASR_PROVIDER=aliyun
-ALIYUN_ACCESS_KEY=your_access_key
-ALIYUN_ACCESS_KEY_SECRET=your_access_key_secret
-ALIYUN_APP_KEY=your_app_key
+ALIYUN_ASR_APPKEY=your_appkey
+ALIYUN_AK_ID=your_access_key_id
+ALIYUN_AK_SECRET=your_access_key_secret
+ALIYUN_ASR_URL=wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1
 ```
 
 ## 🔧 扩展与定制
