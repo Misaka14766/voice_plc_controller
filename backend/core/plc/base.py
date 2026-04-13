@@ -1,5 +1,19 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from enum import Enum
+
+class TriggerMode(Enum):
+    ON_CHANGE = "on_change"      # 仅当值变化时触发回调
+    ALWAYS = "always"            # 每次轮询都触发回调
+
+@dataclass
+class MonitorGroup:
+    variables: List[Tuple[str, str]]  # [(var_name, type), ...]
+    callback: Callable[[Dict[str, Any]], None]
+    mode: TriggerMode = TriggerMode.ALWAYS
+    interval_ms: int = 100
+    group_id: str = ""
 
 class BasePLC(ABC):
     @abstractmethod
@@ -28,32 +42,29 @@ class BasePLC(ABC):
 
     @abstractmethod
     def get_all_symbols(self) -> List[Dict[str, Any]]:
-        """
-        获取 PLC 中所有可访问的变量符号信息。
-        返回格式示例：
-        [
-            {"name": "MAIN.TestInt", "type": "INT", "comment": ""},
-            {"name": "MAIN.TestBool", "type": "BOOL", "comment": ""},
-            ...
-        ]
-        """
         pass
 
-    # 监控相关方法保持不变
     @abstractmethod
-    def start_monitoring(self, variables: List[Tuple[str, str]],
-                         callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-                         interval_ms: int = 100):
+    def add_monitor_group(self, group: MonitorGroup) -> None:
+        """添加一个监控组"""
+        pass
+
+    @abstractmethod
+    def remove_monitor_group(self, group_id: str) -> None:
+        """移除监控组"""
+        pass
+
+    @abstractmethod
+    def start_monitoring(self):
+        """启动所有监控组的后台线程（如果尚未启动）"""
         pass
 
     @abstractmethod
     def stop_monitoring(self):
+        """停止所有监控"""
         pass
 
     @abstractmethod
-    def get_monitored_values(self) -> Dict[str, Any]:
-        pass
-
-    @abstractmethod
-    async def async_monitor_generator(self, variables: List[Tuple[str, str]], interval_ms: int = 100):
+    def get_monitored_values(self, group_id: Optional[str] = None) -> Dict[str, Any]:
+        """获取最新监控值"""
         pass

@@ -45,7 +45,6 @@ def plc_list_variables() -> str:
             return "未找到任何 PLC 变量，请检查连接或程序配置"
 
         lines = ["PLC 中可访问的变量列表："]
-        # 获取物理映射，用于补充显示
         mappings = settings.mappings
         reverse_map = {info['variable']: name for name, info in mappings.items()}
 
@@ -77,8 +76,15 @@ class OpenAICompatibleLLM(BaseLLM):
         self._agent = None
 
     def _build_system_prompt(self) -> str:
-        """构建包含物理映射信息的系统提示词"""
-        base_prompt = "你是工业语音助手，可控制PLC。回答要简短，适合语音播报。"
+        """构建包含物理映射信息及强制工具使用规则的提示词"""
+        base_prompt = (
+            "你是工业语音助手，可控制PLC。回答要简短，适合语音播报。\n\n"
+            "⚠️ 重要规则：\n"
+            "- 任何涉及读取 PLC 变量值的操作，你必须调用 `plc_read` 工具获取实时数据。\n"
+            "- 任何涉及修改 PLC 变量值的操作，你必须调用 `plc_write` 工具执行写入。\n"
+            "- 严禁凭空编造或猜测变量值，必须通过工具获取真实数据。\n"
+            "- 若用户询问当前有哪些可用变量，请调用 `plc_list_variables` 获取列表。\n"
+        )
         mappings = settings.mappings
         if mappings:
             mapping_text = "\n当前配置的物理名称映射：\n"
@@ -88,7 +94,7 @@ class OpenAICompatibleLLM(BaseLLM):
                     f"类型: {info.get('type', 'REAL')}, "
                     f"描述: {info.get('description', '')}\n"
                 )
-            mapping_text += "\n当用户使用物理名称时，优先使用对应的变量路径。"
+            mapping_text += "\n当用户使用物理名称时，优先使用对应的变量路径调用工具。"
             return base_prompt + mapping_text
         return base_prompt
 

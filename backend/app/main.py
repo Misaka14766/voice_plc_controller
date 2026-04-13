@@ -1,7 +1,10 @@
 import asyncio
 import logging
 import sys
-from typing import Optional
+import os
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+sys.path.append(ROOT_DIR)
 
 from backend.config.settings import settings
 from backend.core import get_asr, get_tts, get_llm, get_plc
@@ -11,7 +14,6 @@ from backend.utils.audio_recorder import AudioRecorder
 from backend.utils.key_trigger import KeyTrigger
 from backend.utils.logger import setup_logging
 
-# 初始化彩色日志
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -24,14 +26,12 @@ class VoiceApp:
         self.plc = get_plc()
         set_plc_instance(self.plc)
 
-        # 设置 ASR 回调
         if self.asr:
             self.asr.set_callback(self._on_asr_result)
             self.asr.start()
 
         self.recorder = AudioRecorder()
-        self.is_pressed = False
-        self.partial_text = ""
+        self.is_listening = False
         self.loop = None
 
         self.conversation_history = []
@@ -39,11 +39,11 @@ class VoiceApp:
 
         self.template_matcher = None
 
-        # 键盘触发器
+        # 键盘触发器（如果 PLC 未启用或未配置触发变量时使用）
         self.trigger = KeyTrigger(
-            on_press=self.on_press,
-            on_release=self.on_release,
-            trigger_key=settings.TRIGGER_KEY
+            on_press=self.start_listening,
+            on_release=self.stop_listening,
+            trigger_key=settings.ASR_TRIGGER_KEY
         )
 
         # PLC 连接
@@ -51,88 +51,90 @@ class VoiceApp:
             if self.plc.connect():
                 logger.info("✅ PLC 连接成功")
                 self.template_matcher = TemplateMatcher(self.plc)
-                self._start_default_monitoring()
+                self._setup_plc_monitors()
+                self.plc.start_monitoring()  # 启动统一的监控线程
             else:
-                logger.warning("⚠️ PLC 连接失败，将使用模拟数据")
+                logger.warning("⚠️ PLC 连接失败，将使用键盘触发")
 
-        # 运行时配置（可动态修改）
+        # 运行时语音开关（由配置和控制台命令控制）
         self.runtime_voice_input_enabled = settings.VOICE_INPUT_ENABLED
         self.runtime_voice_output_enabled = settings.VOICE_OUTPUT_ENABLED
 
-        # 控制台输入任务
-        self.console_task: Optional[asyncio.Task] = None
+    def _setup_plc_monitors(self):
+        """配置PLC监控组"""
+        from backend.core.plc.base import MonitorGroup, TriggerMode
 
-    def _start_default_monitoring(self):
+        # 1. 默认变量监控组（持续显示）
         vars_to_monitor = settings.monitor_variables
         if vars_to_monitor:
-            def monitor_callback(values):
-                logger.debug(f"监控值: {values}")
-            self.plc.start_monitoring(
+            group = MonitorGroup(
+                group_id="default_display",
                 variables=vars_to_monitor,
-                callback=monitor_callback,
+                callback=lambda vals: logger.debug(f"监控值: {vals}"),
+                mode=TriggerMode.ALWAYS,
                 interval_ms=settings.MONITOR_INTERVAL_MS
             )
-            logger.info(f"已启动默认监控，变量数量: {len(vars_to_monitor)}")
+            self.plc.add_monitor_group(group)
+
+        # 2. 语音触发变量监控组（变化时触发）
+        trigger_var = settings.PLC_TRIGGER_VAR
+        if trigger_var:
+            group = MonitorGroup(
+                group_id="voice_trigger",
+                variables=[(trigger_var, "BOOL")],
+                callback=self._on_trigger_changed,
+                mode=TriggerMode.ON_CHANGE,
+                interval_ms=50
+            )
+            self.plc.add_monitor_group(group)
+            logger.info(f"已注册触发变量监控: {trigger_var} (变化触发)")
+
+    def _on_trigger_changed(self, values: dict):
+        """触发变量变化回调，在监控线程中调用"""
+        trigger_var = settings.PLC_TRIGGER_VAR
+        current_state = values.get(trigger_var, False)
+        self.start_listening() if current_state else self.stop_listening()
 
     def _on_asr_result(self, text: str, is_final: bool):
-        """ASR 识别结果回调（可能在异步线程中调用）"""
+        """ASR 识别结果回调"""
         if is_final:
             logger.info(f"ASR 最终结果: {text}")
-            # 将处理任务安全地投递到主事件循环
-            asyncio.run_coroutine_threadsafe(self._handle_final_result(text), self.loop)
+            asyncio.run_coroutine_threadsafe(self._handle_input_text(text), self.loop)
         else:
-            # 实时显示中间结果
-            self.partial_text = text
             sys.stdout.write(f"\r(实时) {text}  ")
             sys.stdout.flush()
 
-    async def _handle_final_result(self, text: str):
-        """处理最终识别结果（在主事件循环中执行）"""
-        self.partial_text = text
-        await self._handle_input_text(text)
-
-    def on_press(self):
-        if not self.is_pressed and self.runtime_voice_input_enabled:
-            self.is_pressed = True
-            self.partial_text = ""
+    def start_listening(self):
+        if not self.is_listening and self.runtime_voice_input_enabled:
+            self.is_listening = True
             self.asr.reset()
             self.recorder.start()
             logger.info("🎤 录音中...")
 
-    def on_release(self):
-        if self.is_pressed:
-            self.is_pressed = False
+    def stop_listening(self):
+        if self.is_listening:
+            self.is_listening = False
             self.recorder.stop()
             logger.info("🔇 录音结束")
-            # 发送结束标志给 ASR
             if self.asr:
-                # 需要在事件循环中执行，避免阻塞回调
                 asyncio.run_coroutine_threadsafe(self._send_final_chunk(), self.loop)
 
     async def _send_final_chunk(self):
-        """发送空数据通知 ASR 流结束"""
         self.asr.feed_chunk(b'', is_final=True)
 
     async def _handle_input_text(self, text: str):
-        """统一处理输入文本（语音识别结果或控制台输入）"""
         text = text.strip()
         if not text:
             return
-
-        # 控制台命令检测（以 '/' 开头）
         if text.startswith('/'):
             await self._handle_command(text[1:].strip())
             return
-
         logger.info(f"输入: {text}")
-
-        # 退出命令（普通文本方式也支持）
         if text.lower() in ("退出", "quit", "exit"):
             logger.info("收到退出命令")
             self.running = False
             return
-
-        # ---------- 模板匹配快速通道 ----------
+        # 模板匹配
         if settings.USE_TEMPLATE_MATCHING and self.template_matcher:
             match_result = self.template_matcher.match(text)
             if match_result:
@@ -143,26 +145,21 @@ class VoiceApp:
                 self.conversation_history.append({"role": "assistant", "content": response_text})
                 await self._output_response(response_text)
                 return
-
-        # ---------- LLM 处理 ----------
+        # LLM
         self.conversation_history.append({"role": "user", "content": text})
         if len(self.conversation_history) > self.max_history_turns * 2:
             self.conversation_history = self.conversation_history[-self.max_history_turns * 2:]
-
         messages = [{"role": m["role"], "content": m["content"]} for m in self.conversation_history]
         response = await self.llm.generate(messages=messages)
-
         logger.info(f"LLM: {response.content}")
         self.conversation_history.append({"role": "assistant", "content": response.content})
         await self._output_response(response.content)
 
     async def _handle_command(self, cmd: str):
-        """处理控制台命令"""
         parts = cmd.split()
         if not parts:
             return
         command = parts[0].lower()
-
         if command == "help" or command == "?":
             print("""
 可用命令：
@@ -187,12 +184,12 @@ class VoiceApp:
                     if val in ("on", "true", "1"):
                         self.runtime_voice_input_enabled = True
                         if self.asr:
-                            self.asr.start()  # 启动长连接
+                            self.asr.start()
                         print("✅ 语音输入已开启")
                     elif val in ("off", "false", "0"):
                         self.runtime_voice_input_enabled = False
                         if self.asr:
-                            self.asr.stop()  # 关闭长连接
+                            self.asr.stop()
                         print("🔇 语音输入已关闭")
                     else:
                         print("无效参数，请使用 on 或 off")
@@ -250,46 +247,21 @@ class VoiceApp:
             print(f"未知命令: {command}，输入 /help 查看帮助")
 
     async def _output_response(self, text: str):
-        """根据运行时配置输出响应"""
         if self.runtime_voice_output_enabled:
             await self.tts.speak(text)
-        # 控制台输出始终开启
         print(f"\n🤖 助手: {text}\n")
 
     async def audio_consumer(self):
-        """实时将音频数据送入 ASR（流式）"""
+        """将音频数据送入 ASR"""
         while self.running:
-            if self.is_pressed and self.runtime_voice_input_enabled:
+            if self.is_listening and self.runtime_voice_input_enabled:
                 chunk = self.recorder.get_chunk(timeout=0.1)
                 if chunk:
-                    # 实时喂入音频数据，不等待最终结果
                     self.asr.feed_chunk(chunk, is_final=False)
             else:
                 await asyncio.sleep(0.1)
 
-    async def plc_trigger_monitor(self):
-        """PLC 触发监听（需同时启用 PLC 和语音输入）"""
-        if not settings.PLC_ENABLED or not self.plc or not self.plc.is_connected():
-            return
-        trigger_var = settings.PLC_TRIGGER_VAR
-        last_state = False
-        while self.running:
-            if not self.runtime_voice_input_enabled:
-                await asyncio.sleep(0.1)
-                continue
-            try:
-                current_state = self.plc.read_bool(trigger_var)
-                if current_state and not last_state:
-                    self.on_press()
-                elif not current_state and last_state:
-                    self.on_release()
-                last_state = current_state
-            except Exception as e:
-                logger.error(f"PLC 轮询错误: {e}")
-            await asyncio.sleep(0.05)
-
     async def console_input_loop(self):
-        """控制台输入循环（始终开启）"""
         print("\n💬 控制台已就绪，输入 '/' 查看命令，直接输入文字对话")
         loop = asyncio.get_event_loop()
         while self.running:
@@ -306,16 +278,17 @@ class VoiceApp:
         self.running = True
         self.loop = asyncio.get_running_loop()
 
-        # 启动按键监听
-        self.trigger.start()
-        logger.info(f"按下 '{settings.TRIGGER_KEY}' 键开始说话，松开结束。")
+        # 如果未使用 PLC 触发，则启动键盘监听
+        if not (settings.PLC_ENABLED and self.plc and settings.PLC_TRIGGER_VAR):
+            self.trigger.start()
+            logger.info(f"按下 '{settings.ASR_TRIGGER_KEY}' 键开始说话，松开结束。")
+        else:
+            logger.info("使用 PLC 触发变量控制录音，键盘监听已禁用。")
 
         tasks = [
             asyncio.create_task(self.audio_consumer()),
             asyncio.create_task(self.console_input_loop()),
         ]
-        if settings.PLC_ENABLED and self.plc:
-            tasks.append(asyncio.create_task(self.plc_trigger_monitor()))
 
         print("📝 控制台输出已启用")
 
@@ -325,7 +298,8 @@ class VoiceApp:
             logger.info("用户中断")
         finally:
             self.running = False
-            self.trigger.stop()
+            if not (settings.PLC_ENABLED and self.plc and settings.PLC_TRIGGER_VAR):
+                self.trigger.stop()
             self.recorder.close()
             if self.asr:
                 self.asr.stop()

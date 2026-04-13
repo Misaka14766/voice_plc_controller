@@ -4,7 +4,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import pyads
 from pyads.constants import PLCTYPE_INT, PLCTYPE_BOOL, PLCTYPE_REAL, PLCTYPE_STRING
-from .base import BasePLC
+from .base import BasePLC, MonitorGroup, TriggerMode
 from backend.config import settings
 
 class BeckhoffPLC(BasePLC):
@@ -18,10 +18,10 @@ class BeckhoffPLC(BasePLC):
         }
         self._monitoring = False
         self._monitor_thread: Optional[threading.Thread] = None
-        self._monitor_variables: List[Tuple[str, int]] = []
-        self._monitor_callback: Optional[Callable[[Dict[str, Any]], None]] = None
-        self._monitor_interval = 0.1
-        self._latest_values: Dict[str, Any] = {}
+        self._groups: Dict[str, MonitorGroup] = {}
+        self._group_last_values: Dict[str, Dict[str, Any]] = {}
+        self._latest_values: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.Lock()
 
     def connect(self) -> bool:
         try:
@@ -77,16 +77,13 @@ class BeckhoffPLC(BasePLC):
             return False
 
     def get_all_symbols(self) -> List[Dict[str, Any]]:
-        """获取 PLC 中所有变量符号信息"""
         if not self.is_connected():
             return []
         try:
             symbols = self._conn.get_all_symbols()
             result = []
             for sym in symbols:
-                # 获取类型名称
                 type_name = str(sym.symbol_type) if hasattr(sym, 'symbol_type') else "UNKNOWN"
-                # 尝试提取注释（如果可用）
                 comment = sym.comment if hasattr(sym, 'comment') else ""
                 result.append({
                     "name": sym.name,
@@ -98,50 +95,79 @@ class BeckhoffPLC(BasePLC):
             print(f"获取符号列表失败: {e}")
             return []
 
-    # 监控方法实现（与之前相同，此处省略以节省篇幅）
-    def start_monitoring(self, variables: List[Tuple[str, str]],
-                         callback: Optional[Callable[[Dict[str, Any]], None]] = None,
-                         interval_ms: int = 100):
+    def add_monitor_group(self, group: MonitorGroup) -> None:
+        with self._lock:
+            self._groups[group.group_id] = group
+            self._group_last_values[group.group_id] = {}
+
+    def remove_monitor_group(self, group_id: str) -> None:
+        with self._lock:
+            if group_id in self._groups:
+                del self._groups[group_id]
+            if group_id in self._group_last_values:
+                del self._group_last_values[group_id]
+            if group_id in self._latest_values:
+                del self._latest_values[group_id]
+
+    def start_monitoring(self):
+        if self._monitoring:
+            return
         if not self.is_connected():
             raise RuntimeError("PLC not connected")
-        if self._monitoring:
-            self.stop_monitoring()
-        self._monitor_variables = []
-        for var_name, var_type in variables:
-            ads_type = self._type_map.get(var_type.upper(), PLCTYPE_INT)
-            self._monitor_variables.append((var_name, ads_type))
-        self._monitor_callback = callback
-        self._monitor_interval = interval_ms / 1000.0
         self._monitoring = True
         self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._monitor_thread.start()
 
-    def _monitor_loop(self):
-        while self._monitoring and self.is_connected():
-            values = {}
-            for var_name, ads_type in self._monitor_variables:
-                try:
-                    val = self._conn.read_by_name(var_name, ads_type)
-                    values[var_name] = val
-                except Exception as e:
-                    values[var_name] = f"Error: {e}"
-            self._latest_values = values
-            if self._monitor_callback:
-                try:
-                    self._monitor_callback(values)
-                except Exception as e:
-                    print(f"监控回调异常: {e}")
-            time.sleep(self._monitor_interval)
-
     def stop_monitoring(self):
         self._monitoring = False
         if self._monitor_thread and self._monitor_thread.is_alive():
-            self._monitor_thread.join(timeout=1.0)
+            self._monitor_thread.join(timeout=2.0)
         self._monitor_thread = None
 
-    def get_monitored_values(self) -> Dict[str, Any]:
-        return self._latest_values.copy()
+    def _monitor_loop(self):
+        # 为每个组记录上次轮询时间，按需休眠
+        while self._monitoring and self.is_connected():
+            with self._lock:
+                groups = list(self._groups.values())
+            for group in groups:
+                # 读取该组所有变量
+                values = {}
+                for var_name, var_type in group.variables:
+                    try:
+                        ads_type = self._type_map.get(var_type.upper(), PLCTYPE_INT)
+                        val = self._conn.read_by_name(var_name, ads_type)
+                        values[var_name] = val
+                    except Exception as e:
+                        values[var_name] = f"Error: {e}"
+                with self._lock:
+                    self._latest_values[group.group_id] = values
+                    last_vals = self._group_last_values.get(group.group_id, {})
+                    should_call = False
+                    if group.mode == TriggerMode.ALWAYS:
+                        should_call = True
+                    elif group.mode == TriggerMode.ON_CHANGE:
+                        if values != last_vals:
+                            should_call = True
+                    if should_call:
+                        try:
+                            group.callback(values)
+                        except Exception as e:
+                            print(f"监控回调异常: {e}")
+                    self._group_last_values[group.group_id] = values.copy()
+            # 简单休眠（可优化为动态最小间隔）
+            time.sleep(0.05)
 
+    def get_monitored_values(self, group_id: Optional[str] = None) -> Dict[str, Any]:
+        with self._lock:
+            if group_id:
+                return self._latest_values.get(group_id, {}).copy()
+            # 返回所有组的最新值合并
+            all_vals = {}
+            for gid, vals in self._latest_values.items():
+                all_vals.update(vals)
+            return all_vals
+
+    # 保留原有异步生成器方法（可选）
     async def async_monitor_generator(self, variables: List[Tuple[str, str]], interval_ms: int = 100):
         if not self.is_connected():
             raise RuntimeError("PLC not connected")

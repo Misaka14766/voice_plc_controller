@@ -1,21 +1,12 @@
-# 基础依赖
 python-dotenv
 pyyaml
-
-# ASR 相关
 funasr
 numpy
-
-# TTS 相关
 edge-tts
-
-# LLM 相关
 langchain
 langchain-openai
-
-# PLC 相关
 pyads
-
-# 工具类
 pyaudio
 pynput
+colorlog
+pygame

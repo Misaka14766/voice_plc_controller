@@ -9,24 +9,23 @@ class Settings:
     # ASR 通用配置
     ASR_PROVIDER = os.getenv("ASR_PROVIDER", "funasr")  # funasr / aliyun
     ASR_SAMPLE_RATE = int(os.getenv("ASR_SAMPLE_RATE", "16000"))
+    ASR_TRIGGER_KEY = os.getenv("ASR_TRIGGER_KEY", "ctrl_r")
 
     # FunASR 配置
     ASR_MODEL = os.getenv("ASR_MODEL", "paraformer-zh-streaming")
     ASR_DEVICE = os.getenv("ASR_DEVICE", "cpu")
-
     # FunASR 流式参数
     ASR_CHUNK_SIZE_STR = os.getenv("ASR_CHUNK_SIZE", "0,10,5")
     ASR_ENCODER_CHUNK_LOOK_BACK = int(os.getenv("ASR_ENCODER_CHUNK_LOOK_BACK", "4"))
     ASR_DECODER_CHUNK_LOOK_BACK = int(os.getenv("ASR_DECODER_CHUNK_LOOK_BACK", "1"))
 
-    # 阿里云 ASR 配置（支持 AK/SK 动态获取 Token）
+    # 阿里云 ASR 配置
     ALIYUN_ASR_APPKEY = os.getenv("ALIYUN_ASR_APPKEY", "")
     ALIYUN_AK_ID = os.getenv("ALIYUN_AK_ID", "")
     ALIYUN_AK_SECRET = os.getenv("ALIYUN_AK_SECRET", "")
     ALIYUN_ASR_URL = os.getenv("ALIYUN_ASR_URL", "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1")
     ALIYUN_ASR_REGION = os.getenv("ALIYUN_ASR_REGION", "cn-shanghai")
-
-    # 兼容旧版 Token 直接配置（优先级低于 AK/SK）
+    # 兼容旧版 Token 直接配置
     ALIYUN_ASR_TOKEN = os.getenv("ALIYUN_ASR_TOKEN", "")
 
     @property
@@ -38,6 +37,7 @@ class Settings:
     TTS_PROVIDER = os.getenv("TTS_PROVIDER", "edge")
     TTS_VOICE = os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural")
     TTS_VOLUME = float(os.getenv("TTS_VOLUME", "0.8"))
+    TTS_PLAYER = os.getenv("TTS_PLAYER", "pygame")   # pygame / system
 
     # LLM
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
@@ -53,10 +53,7 @@ class Settings:
     PLC_AMS_NET_ID = os.getenv("PLC_AMS_NET_ID", "192.168.1.1.1.1")
     PLC_AMS_PORT = int(os.getenv("PLC_AMS_PORT", "851"))
     PLC_IP_ADDRESS = os.getenv("PLC_IP_ADDRESS", None)
-    PLC_TRIGGER_VAR = os.getenv("PLC_TRIGGER_VAR", "GVL.bVoiceTrigger")
-
-    # 按键触发
-    TRIGGER_KEY = os.getenv("TRIGGER_KEY", "ctrl_r")
+    PLC_TRIGGER_VAR = os.getenv("PLC_TRIGGER_VAR", None)
 
     # 日志
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
