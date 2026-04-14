@@ -1,31 +1,42 @@
 # Voice PLC Controller
 
-一个基于语音识别和大语言模型的 PLC 控制器，支持通过语音指令控制工业设备。
+一个基于语音识别和大语言模型的 PLC 控制器，支持通过语音指令控制工业设备，包含完整的前后端实现。
 
 ## 🚀 功能特点
 
 - **语音交互**：通过语音指令控制 PLC 设备
 - **多平台支持**：兼容 Windows、Linux 和 macOS
 - **模块化设计**：支持多种 ASR、TTS 和 LLM 提供商
-- **实时监控**：实时监控 PLC 变量状态
+- **实时监控**：实时监控 PLC 变量状态，支持变量读写操作
 - **模板匹配**：快速响应常用指令，减少 LLM 调用
 - **控制台交互**：支持命令行交互模式
 - **PLC 触发**：支持通过 PLC 变量触发语音输入
 - **RESTful API**：提供 HTTP 接口，支持与其他系统集成
+- **现代化前端**：基于 Vue 3 + TypeScript + Element Plus 的响应式界面
+- **多页面设计**：包含语音控制、PLC监控、配置管理和关于页面
 
 ## 🛠️ 技术栈
 
-- **后端**：Python 3.8+
+### 后端
+- **语言**：Python 3.8+
+- **Web 框架**：FastAPI
 - **语音识别**：FunASR、阿里云 ASR
 - **语音合成**：Edge TTS
 - **大语言模型**：OpenAI 兼容 API（如 DeepSeek）
 - **PLC 通信**：pyads（Beckhoff PLC）
-- **Web 框架**：FastAPI
 - **工具库**：pyaudio、pynput、pygame
+
+### 前端
+- **框架**：Vue 3 + TypeScript
+- **UI 库**：Element Plus
+- **构建工具**：Vite
+- **路由**：Vue Router
+- **状态管理**：Pinia
+- **HTTP 客户端**：Axios
 
 ## 📦 快速开始
 
-### 1. 安装依赖
+### 1. 安装后端依赖
 
 ```bash
 # 进入 backend 目录
@@ -35,7 +46,19 @@ cd backend
 pip install -r requirements.txt
 ```
 
-### 2. 配置环境变量
+### 2. 安装前端依赖
+
+```bash
+# 进入 frontend 目录
+cd frontend
+
+# 安装依赖
+npm install
+```
+
+### 3. 配置环境变量
+
+#### 后端环境变量
 
 复制 `backend/.env.example` 文件为 `backend/.env` 并填写相关配置：
 
@@ -90,19 +113,22 @@ VERBOSE=true
 # MONITOR_INTERVAL_MS=200
 ```
 
-### 3. 运行程序
+#### 前端环境变量
 
-#### 命令行模式
+复制 `frontend/.env.example` 文件为 `frontend/.env` 并填写相关配置：
 
-```bash
-# 进入 backend 目录
-cd backend
+```env
+# 后端API基础URL
+VITE_API_BASE_URL=http://localhost:8000
 
-# 运行主程序
-python app/main.py
+# 前端应用配置
+VITE_APP_TITLE=语音PLC控制
+VITE_APP_VERSION=1.0.0
 ```
 
-#### API 模式
+### 4. 运行程序
+
+#### 后端 API 服务
 
 ```bash
 # 进入 backend 目录
@@ -112,38 +138,56 @@ cd backend
 python app/api.py
 ```
 
+#### 前端开发服务器
+
+```bash
+# 进入 frontend 目录
+cd frontend
+
+# 运行开发服务器
+npm run dev
+```
+
 ## 🎯 使用方法
 
-### 语音控制
+### 前端界面使用
 
-1. 按下配置的触发键（默认 `Ctrl+R`）开始说话
-2. 说出控制指令，例如：
-   - "启动电机"
-   - "设置温度为 25 度"
-   - "查看当前压力"
-3. 松开触发键，系统会识别并执行指令
+1. **语音控制页面**：
+   - 通过文本输入框输入指令
+   - 点击麦克风按钮进行语音输入
+   - 查看系统状态和响应
 
-### 控制台命令
+2. **PLC监控页面**：
+   - 查看 PLC 变量列表
+   - 搜索和筛选变量
+   - 编辑变量值
+   - 实时刷新变量状态
 
-输入 `/help` 查看可用命令：
+3. **配置管理页面**：
+   - 查看系统配置
+   - 查看连接状态
+   - 查看系统信息
 
-- `/voice input on/off` - 开启/关闭语音输入
-- `/voice output on/off` - 开启/关闭语音输出
-- `/voice status` - 查看当前语音状态
-- `/volume [0.0-1.0]` - 设置或查看音量
-- `/stop` - 停止当前播放
-- `/plc status` - 查看 PLC 连接状态
-- `/clear` - 清空对话历史
-- `/exit` 或 `/quit` - 退出程序
+4. **关于页面**：
+   - 查看项目信息
+   - 了解核心功能
+   - 查看技术栈
 
 ### API 接口
 
 运行 API 服务后，可以通过以下接口与系统交互：
 
-- `POST /api/voice` - 发送语音指令
-- `POST /api/text` - 发送文本指令
+- `POST /api/chat` - 发送文本指令
+- `POST /api/plc/read` - 读取 PLC 变量
+- `POST /api/plc/write` - 写入 PLC 变量
+- `GET /api/plc/variables` - 获取 PLC 变量列表
+- `POST /api/tts` - 文本转语音
+- `GET /api/health` - 健康检查
 - `GET /api/status` - 获取系统状态
-- `GET /api/plc/status` - 获取 PLC 状态
+- `POST /api/clear` - 清空对话历史
+- `GET /api/history` - 获取对话历史
+- `GET /api/config` - 获取系统配置
+- `WebSocket /ws/asr` - 语音识别WebSocket接口
 
 ## 📁 目录结构
 
@@ -187,6 +231,38 @@ voice_plc_controller/
 │   ├── .env.example      # 环境变量模板
 │   ├── __init__.py
 │   └── requirements.txt  # 依赖包
+├── frontend/             # 前端应用
+│   ├── public/           # 公共静态资源
+│   │   └── favicon.ico   # 网站图标
+│   ├── src/              # 源代码目录
+│   │   ├── api/          # API 调用封装
+│   │   │   ├── index.ts  # API 接口定义
+│   │   │   └── websocket.ts  # WebSocket 通信
+│   │   ├── assets/       # 静态资源
+│   │   │   ├── base.css  # 基础样式
+│   │   │   ├── logo.svg  # 项目 logo
+│   │   │   └── main.css  # 全局样式
+│   │   ├── components/   # 组件
+│   │   │   └── PlcPanel.vue  # PLC 控制面板
+│   │   ├── router/       # 路由配置
+│   │   │   └── index.ts  # 路由定义
+│   │   ├── views/        # 页面视图
+│   │   │   ├── AboutView.vue  # 关于页面
+│   │   │   ├── ConfigView.vue  # 配置管理页面
+│   │   │   ├── HomeView.vue  # 语音控制页面
+│   │   │   └── PlcMonitorView.vue  # PLC 监控页面
+│   │   ├── App.vue       # 应用根组件
+│   │   └── main.ts       # 应用入口
+│   ├── .env              # 环境变量配置
+│   ├── .env.example      # 环境变量模板
+│   ├── index.html        # HTML 入口
+│   ├── package.json      # 前端项目配置
+│   ├── package-lock.json # 依赖版本锁定
+│   ├── tsconfig.json     # TypeScript 配置
+│   └── vite.config.ts    # Vite 配置
+├── .gitignore            # Git 忽略配置
+├── .gitattributes        # Git 属性配置
+├── LICENSE               # 许可证文件
 └── README.md             # 项目说明
 ```
 
@@ -293,4 +369,4 @@ ALIYUN_ASR_URL=wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1
 
 ---
 
-**注意**：本项目目前专注于后端功能开发，前端代码尚未完成。
+**注意**：本项目前端功能尚未完成。
