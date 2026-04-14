@@ -57,7 +57,7 @@ const activeIndex = computed(() => {
   return route.path
 })
 
-const logoUrl = '/src/assets/logo.svg'
+const logoUrl = '/src/assets/logo.jpg'
 
 const handleMenuSelect = (key: string) => {
   router.push(key)

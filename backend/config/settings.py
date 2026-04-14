@@ -3,7 +3,15 @@ import yaml
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# 加载.env文件
+BACKEND_ROOT = Path(__file__).parent.parent
+ENV_FILE = BACKEND_ROOT / '.env'
+load_dotenv(dotenv_path=ENV_FILE)
+
+# 确保环境变量加载成功
+if not os.getenv('ASR_PROVIDER'):
+    print(f"警告: 未找到.env文件或环境变量未设置，使用默认值")
+    print(f"尝试加载的.env文件路径: {ENV_FILE}")
 
 class Settings:
     # ASR 通用配置
