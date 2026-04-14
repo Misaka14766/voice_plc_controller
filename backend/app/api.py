@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from ..config.settings import settings
-from ..core import get_llm, get_plc
+from ..core import get_llm, get_plc, get_asr, get_tts
 from ..core.llm.openai_llm import set_plc_instance
 from ..core.template_matcher import TemplateMatcher
 
@@ -45,6 +45,14 @@ class PLCWriteRequest(BaseModel):
     data_type: str = "INT"
 
 
+class SystemStatus(BaseModel):
+    plc_connected: bool
+    asr_provider: str
+    tts_provider: str
+    llm_provider: str
+    template_matching: bool
+
+
 @app.on_event("startup")
 async def startup_event():
     """启动时连接PLC"""
@@ -64,11 +72,11 @@ async def shutdown_event():
 
 @app.post("/api/chat")
 async def chat(request: TextRequest):
-    """文本对话接口（无语音）"""
+    """文本对话接口"""
     global conversation_history
     text = request.text.strip()
     if not text:
-        return {"response": ""}
+        return {"response": "", "template": False}
 
     # 模板匹配快速通道
     if settings.USE_TEMPLATE_MATCHING and template_matcher:
@@ -96,12 +104,12 @@ async def chat(request: TextRequest):
 async def plc_read(request: PLCReadRequest):
     """读取PLC变量"""
     if not plc or not plc.is_connected():
-        return {"success": False, "error": "PLC 未连接"}
+        return {"success": False, "error": "PLC 未连接", "value": None}
     try:
         value = plc.read(request.variable, request.data_type)
-        return {"success": True, "value": value}
+        return {"success": True, "value": value, "error": None}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "value": None}
 
 
 @app.post("/api/plc/write")
@@ -111,7 +119,7 @@ async def plc_write(request: PLCWriteRequest):
         return {"success": False, "error": "PLC 未连接"}
     try:
         success = plc.write(request.variable, request.value, request.data_type)
-        return {"success": success}
+        return {"success": success, "error": None if success else "写入失败"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -123,7 +131,7 @@ async def list_variables():
         return {"success": False, "error": "PLC 未连接", "variables": []}
     try:
         symbols = plc.get_all_symbols()
-        return {"success": True, "variables": symbols}
+        return {"success": True, "variables": symbols, "error": None}
     except Exception as e:
         return {"success": False, "error": str(e), "variables": []}
 
@@ -135,7 +143,6 @@ async def websocket_asr(websocket: WebSocket):
     前端发送音频数据（base64编码的PCM16），后端实时返回识别结果
     """
     await websocket.accept()
-    from ..core import get_asr
     asr = get_asr()
     asr.start()
     asr.set_callback(lambda text, is_final: None)  # 同步回调用于内部状态
@@ -175,11 +182,10 @@ async def websocket_asr(websocket: WebSocket):
 @app.post("/api/tts")
 async def tts_synthesize(request: TextRequest):
     """文本转语音，返回音频base64"""
-    from ..core import get_tts
     tts = get_tts()
     audio_bytes = await tts.synthesize_async(request.text)
     audio_b64 = base64.b64encode(audio_bytes).decode()
-    return {"audio": audio_b64}
+    return {"audio": audio_b64, "success": True}
 
 
 @app.get("/api/health")
@@ -190,7 +196,21 @@ async def health():
         "plc_connected": plc.is_connected() if plc else False,
         "asr_provider": settings.ASR_PROVIDER,
         "tts_provider": settings.TTS_PROVIDER,
+        "llm_provider": settings.LLM_PROVIDER,
+        "template_matching": settings.USE_TEMPLATE_MATCHING,
     }
+
+
+@app.get("/api/status")
+async def get_status():
+    """获取系统状态"""
+    return SystemStatus(
+        plc_connected=plc.is_connected() if plc else False,
+        asr_provider=settings.ASR_PROVIDER,
+        tts_provider=settings.TTS_PROVIDER,
+        llm_provider=settings.LLM_PROVIDER,
+        template_matching=settings.USE_TEMPLATE_MATCHING,
+    )
 
 
 @app.post("/api/clear")
@@ -199,3 +219,23 @@ async def clear_history():
     global conversation_history
     conversation_history = []
     return {"success": True}
+
+
+@app.get("/api/history")
+async def get_history():
+    """获取对话历史"""
+    return {"history": conversation_history, "success": True}
+
+
+@app.get("/api/config")
+async def get_config():
+    """获取系统配置"""
+    return {
+        "asr_provider": settings.ASR_PROVIDER,
+        "tts_provider": settings.TTS_PROVIDER,
+        "llm_provider": settings.LLM_PROVIDER,
+        "plc_enabled": settings.PLC_ENABLED,
+        "template_matching": settings.USE_TEMPLATE_MATCHING,
+        "voice_input_enabled": settings.VOICE_INPUT_ENABLED,
+        "voice_output_enabled": settings.VOICE_OUTPUT_ENABLED,
+    }
