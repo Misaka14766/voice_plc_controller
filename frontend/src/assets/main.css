@@ -1,0 +1,384 @@
+/* 全局样式重置 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #303133;
+  background-color: #f5f7fa;
+}
+
+/* 应用容器 */
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 头部样式 */
+.app-header {
+  background-color: #3a8ee6;
+  color: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* 主内容区域 */
+.app-main {
+  flex: 1;
+  padding: 20px;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* 底部样式 */
+.app-footer {
+  background-color: #f5f7fa;
+  border-top: 1px solid #e4e7ed;
+  text-align: center;
+  padding: 10px 0;
+  color: #606266;
+  font-size: 14px;
+}
+
+/* 卡片样式 */
+.card-container {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.05);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  border-bottom: 1px solid #ebeef5;
+  background-color: #fafafa;
+}
+
+.card-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+}
+
+/* 对话区域 */
+.chat-container {
+  margin-top: 20px;
+}
+
+.chat-history {
+  height: 400px;
+  overflow-y: auto;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 20px;
+  background-color: #f9f9f9;
+}
+
+.message {
+  display: flex;
+  margin-bottom: 15px;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.user-message {
+  flex-direction: row-reverse;
+}
+
+.message-avatar {
+  margin: 0 10px;
+}
+
+.message-content {
+  flex: 1;
+  max-width: 70%;
+}
+
+.user-message .message-content {
+  text-align: right;
+}
+
+.message-text {
+  padding: 10px 15px;
+  border-radius: 18px;
+  line-height: 1.4;
+}
+
+.user-message .message-text {
+  background-color: #409eff;
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.assistant-message .message-text {
+  background-color: white;
+  color: #303133;
+  border: 1px solid #e4e7ed;
+  border-bottom-left-radius: 4px;
+}
+
+/* 输入区域 */
+.input-container {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.text-input {
+  flex: 1;
+}
+
+.voice-button {
+  width: 50px;
+  height: 50px;
+}
+
+/* 快捷指令 */
+.quick-commands {
+  margin-top: 30px;
+}
+
+.quick-command-tag {
+  margin: 5px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.quick-command-tag:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 系统状态 */
+.system-status {
+  margin-top: 30px;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .header-content {
+    flex-direction: column;
+    height: auto;
+    padding: 10px;
+  }
+
+  .logo {
+    margin-bottom: 10px;
+  }
+
+  .app-title {
+    font-size: 16px;
+  }
+
+  .el-menu {
+    width: 100%;
+  }
+
+  .app-main {
+    padding: 10px;
+  }
+
+  .chat-history {
+    height: 300px;
+  }
+
+  .message-content {
+    max-width: 85%;
+  }
+
+  .input-container {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .voice-button {
+    align-self: center;
+  }
+}
+
+/* 加载动画 */
+.loading-spinner {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100px;
+}
+
+/* 错误提示 */
+.error-message {
+  color: #f56c6c;
+  font-size: 14px;
+  margin-top: 10px;
+}
+
+/* 成功提示 */
+.success-message {
+  color: #67c23a;
+  font-size: 14px;
+  margin-top: 10px;
+}
+
+/* 状态标签 */
+.status-tag {
+  margin-left: 10px;
+}
+
+/* 录音动画 */
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  background-color: #f0f9ff;
+  border: 1px solid #e1f5fe;
+  border-radius: 18px;
+  color: #0288d1;
+}
+
+.recording-icon {
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.recording-animation {
+  display: flex;
+  gap: 5px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #0288d1;
+  animation: bounce 1.5s infinite;
+}
+
+.dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* 表格样式 */
+.plc-variable-table {
+  margin-top: 20px;
+}
+
+/* 表单样式 */
+.form-item {
+  margin-bottom: 20px;
+}
+
+/* 按钮样式 */
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+/* 标签页样式 */
+.tab-content {
+  padding: 20px;
+}
+
+/* 响应式表格 */
+@media (max-width: 768px) {
+  .el-table {
+    font-size: 12px;
+  }
+
+  .el-table th,
+  .el-table td {
+    padding: 8px;
+  }
+}
