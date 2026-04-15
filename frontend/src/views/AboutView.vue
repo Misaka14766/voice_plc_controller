@@ -89,7 +89,7 @@
 <script setup lang="ts">
 import { Mic, Monitor, Cpu } from '@element-plus/icons-vue'
 
-const logoUrl = '/src/assets/logo.svg'
+import logoUrl from '@/assets/logo.jpg'
 
 const techStack = [
   { name: '后端', description: 'Python 3.8+, FastAPI' },
