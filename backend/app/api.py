@@ -1,15 +1,19 @@
 import base64
 import logging
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
 
 from ..config.settings import settings
 from ..core import get_llm, get_plc, get_asr, get_tts
 from ..core.llm.openai_llm import set_plc_instance
 from ..core.template_matcher import TemplateMatcher
+from ..core.db import DatabaseFactory, DatabaseInterface
+from ..core.db.queries import DataQuerier
+from ..core.plc.collector import PLCCollector
 
-# 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -18,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Voice PLC Control API")
 
-# 允许跨域（开发时可设 "*"，生产环境改为具体域名）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,13 +30,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 初始化核心组件
 plc = get_plc()
 set_plc_instance(plc)
 llm = get_llm()
 template_matcher = TemplateMatcher(plc) if plc else None
 
-# 对话历史存储（简单内存存储，生产环境可换Redis）
+db_manager: Optional[DatabaseInterface] = None
+data_collector: Optional[PLCCollector] = None
+
 conversation_history = []
 max_history_turns = 10
 
@@ -49,7 +53,7 @@ class PLCReadRequest(BaseModel):
 
 class PLCWriteRequest(BaseModel):
     variable: str
-    value: str
+    value: str | int | bool
     data_type: str = "INT"
 
 
@@ -63,176 +67,227 @@ class SystemStatus(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    """启动时连接PLC"""
+    global db_manager, data_collector
+
     if plc:
         if plc.connect():
-            print("✅ PLC 连接成功")
+            logger.info("✅ PLC 连接成功")
         else:
-            print("⚠️ PLC 连接失败")
+            logger.warning("⚠️ PLC 连接失败")
+
+    if settings.DB_ENABLED:
+        try:
+            if settings.DB_TYPE == "sqlite":
+                db_manager = DatabaseFactory.create_database(
+                    db_type="sqlite",
+                    db_path=settings.SQLITE_DB_PATH
+                )
+            else:
+                logger.error(f"不支持的数据库类型: {settings.DB_TYPE}")
+                db_manager = None
+
+            if db_manager and db_manager.connect():
+                DataQuerier.init_instance(db_manager)
+                logger.info(f"✅ {settings.DB_TYPE.upper()} 数据库连接成功")
+
+                if settings.DATA_COLLECTION_ENABLED and plc:
+                    data_collector = PLCCollector(
+                        plc=plc,
+                        db_manager=db_manager,
+                        interval_ms=settings.DATA_COLLECTION_INTERVAL
+                    )
+                    for var_name, var_type in settings.monitor_variables:
+                        data_collector.add_variable(var_name, var_type)
+
+                    if settings.DATA_COLLECTION_BATCH_SIZE > 1:
+                        data_collector.set_batch_size(settings.DATA_COLLECTION_BATCH_SIZE)
+
+                    data_collector.start()
+                    logger.info(f"✅ 数据采集器已启动，间隔: {settings.DATA_COLLECTION_INTERVAL}ms")
+            else:
+                logger.error(f"⚠️ {settings.DB_TYPE.upper()} 数据库连接失败")
+                db_manager = None
+        except Exception as e:
+            logger.error(f"⚠️ 数据库初始化失败: {e}")
+            db_manager = None
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """关闭时断开PLC"""
-    if plc:
-        plc.disconnect()
+    global db_manager, data_collector
 
+    if data_collector:
+        data_collector.stop()
+        logger.info("数据采集器已停止")
 
-@app.post("/api/chat")
-async def chat(request: TextRequest):
-    """文本对话接口"""
-    try:
-        global conversation_history
-        text = request.text.strip()
-        if not text:
-            return {"response": "", "template": False}
-
-        # 模板匹配快速通道
-        if settings.USE_TEMPLATE_MATCHING and template_matcher:
-            try:
-                match_result = template_matcher.match(text)
-                if match_result:
-                    op_type, params = match_result
-                    response_text = template_matcher.execute(op_type, params)
-                    conversation_history.append({"role": "user", "content": text})
-                    conversation_history.append({"role": "assistant", "content": response_text})
-                    return {"response": response_text, "template": True}
-            except Exception as e:
-                logger.error(f"模板匹配失败: {str(e)}")
-                # 模板匹配失败后继续使用LLM处理
-
-        # LLM 处理
-        conversation_history.append({"role": "user", "content": text})
-        if len(conversation_history) > max_history_turns * 2:
-            conversation_history = conversation_history[-max_history_turns * 2:]
-
-        messages = [{"role": m["role"], "content": m["content"]} for m in conversation_history]
-        response = await llm.generate(messages=messages)
-
-        conversation_history.append({"role": "assistant", "content": response.content})
-        return {"response": response.content, "template": False}
-    except Exception as e:
-        logger.error(f"对话接口错误: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"对话处理失败: {str(e)}")
-
-
-@app.post("/api/plc/read")
-async def plc_read(request: PLCReadRequest):
-    """读取PLC变量"""
-    try:
-        if not plc or not plc.is_connected():
-            return {"success": False, "error": "PLC 未连接", "value": None}
-        try:
-            value = plc.read(request.variable, request.data_type)
-            return {"success": True, "value": value, "error": None}
-        except Exception as e:
-            logger.error(f"读取PLC变量失败: {str(e)}")
-            return {"success": False, "error": str(e), "value": None}
-    except Exception as e:
-        logger.error(f"PLC读取接口错误: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"PLC读取处理失败: {str(e)}")
-
-
-@app.post("/api/plc/write")
-async def plc_write(request: PLCWriteRequest):
-    """写入PLC变量"""
-    try:
-        if not plc or not plc.is_connected():
-            return {"success": False, "error": "PLC 未连接"}
-        try:
-            success = plc.write(request.variable, request.value, request.data_type)
-            return {"success": success, "error": None if success else "写入失败"}
-        except Exception as e:
-            logger.error(f"写入PLC变量失败: {str(e)}")
-            return {"success": False, "error": str(e)}
-    except Exception as e:
-        logger.error(f"PLC写入接口错误: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"PLC写入处理失败: {str(e)}")
-
-
-@app.get("/api/plc/variables")
-async def list_variables():
-    """获取PLC所有变量"""
-    try:
-        if not plc or not plc.is_connected():
-            return {"success": False, "error": "PLC 未连接", "variables": []}
-        try:
-            symbols = plc.get_all_symbols()
-            return {"success": True, "variables": symbols, "error": None}
-        except Exception as e:
-            logger.error(f"获取PLC变量列表失败: {str(e)}")
-            return {"success": False, "error": str(e), "variables": []}
-    except Exception as e:
-        logger.error(f"PLC变量列表接口错误: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"PLC变量列表处理失败: {str(e)}")
+    if db_manager:
+        db_manager.disconnect()
+        logger.info("数据库连接已关闭")
 
 
 @app.websocket("/ws/asr")
 async def websocket_asr(websocket: WebSocket):
-    """
-    语音识别WebSocket接口
-    前端发送音频数据（base64编码的PCM16），后端实时返回识别结果
-    """
-    asr = None
+    """WebSocket 实时语音识别"""
+    await websocket.accept()
     try:
-        await websocket.accept()
         asr = get_asr()
-        asr.start()
-        asr.set_callback(lambda text, is_final: None)  # 同步回调用于内部状态
+        if not asr:
+            await websocket.close(code=1000, reason="ASR 服务未初始化")
+            return
 
-        full_text = ""
-
-        try:
-            while True:
-                data = await websocket.receive_json()
-                if data.get("type") == "audio":
-                    try:
-                        # 解码base64音频数据
-                        audio_bytes = base64.b64decode(data["data"])
-                        is_final = data.get("is_final", False)
-
-                        # 送入ASR
-                        result = asr.feed_chunk(audio_bytes, is_final=is_final)
-
-                        # 返回识别结果
-                        await websocket.send_json({
-                            "type": "partial" if not is_final else "final",
-                            "text": result
-                        })
-
-                        if is_final:
-                            full_text = result
-                            asr.reset()
-                            break
-                    except Exception as e:
-                        logger.error(f"处理音频数据失败: {str(e)}")
-                        await websocket.send_json({
-                            "type": "error",
-                            "text": f"处理音频数据失败: {str(e)}"
-                        })
-                        break
-                elif data.get("type") == "reset":
-                    asr.reset()
-                    full_text = ""
-        except WebSocketDisconnect:
-            logger.info("WebSocket连接已断开")
-        except Exception as e:
-            logger.error(f"WebSocket处理错误: {str(e)}")
-            try:
-                await websocket.send_json({
-                    "type": "error",
-                    "text": f"WebSocket处理错误: {str(e)}"
-                })
-            except:
-                pass
+        await asr.start_streaming(websocket)
+    except WebSocketDisconnect:
+        logger.info("WebSocket 连接断开")
     except Exception as e:
-        logger.error(f"WebSocket连接错误: {str(e)}")
-    finally:
-        if asr:
+        logger.error(f"WebSocket 错误: {str(e)}")
+        await websocket.close(code=1000, reason=str(e))
+
+
+@app.post("/api/chat")
+async def chat(request: TextRequest):
+    """对话接口"""
+    try:
+        if not llm:
+            raise HTTPException(status_code=503, detail="LLM 服务未初始化")
+
+        conversation_history.append({"role": "user", "content": request.text})
+
+        if len(conversation_history) > max_history_turns * 2:
+            conversation_history[:] = conversation_history[-max_history_turns * 2:]
+
+        response = await llm.generate_async(conversation_history)
+
+        conversation_history.append({"role": "assistant", "content": response})
+
+        return {"response": response, "success": True}
+    except Exception as e:
+        logger.error(f"对话处理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"对话处理失败: {str(e)}")
+
+
+@app.get("/api/plc/variables")
+async def list_plc_variables():
+    """获取 PLC 变量列表"""
+    try:
+        if not plc or not plc.is_connected():
+            raise HTTPException(status_code=503, detail="PLC 未连接")
+
+        variables = []
+        for var_name, var_type in settings.monitor_variables:
             try:
-                asr.stop()
-            except:
-                pass
+                comment = ""
+                if settings.VARIABLE_MAPPINGS and var_name in settings.VARIABLE_MAPPINGS:
+                    comment = settings.VARIABLE_MAPPINGS[var_name].get('comment', '')
+            except Exception:
+                comment = ""
+
+            variables.append({
+                "name": var_name,
+                "type": var_type,
+                "comment": comment
+            })
+
+        return {"success": True, "variables": variables}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取 PLC 变量列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取 PLC 变量列表失败: {str(e)}")
+
+
+@app.post("/api/plc/read")
+async def plc_read(request: PLCReadRequest):
+    """读取 PLC 变量"""
+    try:
+        if not plc or not plc.is_connected():
+            raise HTTPException(status_code=503, detail="PLC 未连接")
+
+        value = plc.read(request.variable, request.data_type)
+        return {"variable": request.variable, "value": value, "success": True}
+    except Exception as e:
+        logger.error(f"读取 PLC 变量失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"读取 PLC 变量失败: {str(e)}")
+
+
+@app.post("/api/plc/write")
+async def plc_write(request: PLCWriteRequest):
+    """写入 PLC 变量"""
+    try:
+        if not plc or not plc.is_connected():
+            raise HTTPException(status_code=503, detail="PLC 未连接")
+
+        plc.write(request.variable, request.value, request.data_type)
+        return {"variable": request.variable, "value": request.value, "success": True}
+    except Exception as e:
+        logger.error(f"写入 PLC 变量失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"写入 PLC 变量失败: {str(e)}")
+
+
+@app.post("/api/voice")
+async def voice_interaction(request: TextRequest):
+    """语音交互接口"""
+    try:
+        if not llm:
+            raise HTTPException(status_code=503, detail="LLM 服务未初始化")
+
+        if template_matcher and settings.USE_TEMPLATE_MATCHING:
+            result = template_matcher.match_and_execute(request.text)
+            if result:
+                return {"response": result, "success": True}
+
+        conversation_history.append({"role": "user", "content": request.text})
+
+        if len(conversation_history) > max_history_turns * 2:
+            conversation_history[:] = conversation_history[-max_history_turns * 2:]
+
+        response = await llm.generate_async(conversation_history)
+
+        conversation_history.append({"role": "assistant", "content": response})
+
+        if settings.VOICE_OUTPUT_ENABLED:
+            tts = get_tts()
+            if tts:
+                try:
+                    audio_bytes = await tts.synthesize_async(response)
+                    audio_b64 = base64.b64encode(audio_bytes).decode()
+                    return {"response": response, "audio": audio_b64, "success": True}
+                except Exception as e:
+                    logger.error(f"语音合成失败: {str(e)}")
+
+        return {"response": response, "success": True}
+    except Exception as e:
+        logger.error(f"语音交互处理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"语音交互处理失败: {str(e)}")
+
+
+@app.post("/api/asr/start")
+async def start_asr():
+    """启动语音识别"""
+    try:
+        asr = get_asr()
+        if not asr:
+            raise HTTPException(status_code=503, detail="ASR 服务未初始化")
+
+        asr.start()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"启动语音识别失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"启动语音识别失败: {str(e)}")
+
+
+@app.post("/api/asr/stop")
+async def stop_asr():
+    """停止语音识别"""
+    try:
+        asr = get_asr()
+        if not asr:
+            raise HTTPException(status_code=503, detail="ASR 服务未初始化")
+
+        asr.stop()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"停止语音识别失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"停止语音识别失败: {str(e)}")
 
 
 @app.post("/api/tts")
@@ -305,7 +360,6 @@ async def get_history():
 
 @app.get("/api/config")
 async def get_config():
-    """获取系统配置"""
     try:
         return {
             "asr_provider": settings.ASR_PROVIDER,
@@ -315,7 +369,123 @@ async def get_config():
             "template_matching": settings.USE_TEMPLATE_MATCHING,
             "voice_input_enabled": settings.VOICE_INPUT_ENABLED,
             "voice_output_enabled": settings.VOICE_OUTPUT_ENABLED,
+            "db_enabled": settings.DB_ENABLED,
+            "db_type": settings.DB_TYPE,
+            "data_collection_enabled": settings.DATA_COLLECTION_ENABLED,
         }
     except Exception as e:
         logger.error(f"获取系统配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"系统配置处理失败: {str(e)}")
+
+
+@app.get("/api/data/realtime")
+async def get_realtime_data(
+    variables: List[str] = Query(..., description="变量名列表")
+):
+    try:
+        if not db_manager:
+            raise HTTPException(status_code=503, detail="数据库未启用")
+
+        result = DataQuerier.get_realtime(variables)
+        return {"success": True, "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取实时数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取实时数据失败: {str(e)}")
+
+
+@app.get("/api/data/history")
+async def get_history_data(
+    variable: str = Query(..., description="变量名"),
+    hours: int = Query(1, description="查询小时数"),
+    aggregation: str = Query("mean", description="聚合函数: mean, max, min, sum, first, last")
+):
+    try:
+        if not db_manager:
+            raise HTTPException(status_code=503, detail="数据库未启用")
+
+        window_seconds = int(hours * 60 * 60 / 100)
+        if window_seconds < 60:
+            window_seconds = 60
+
+        data = DataQuerier.get_aggregated(
+            variable_name=variable,
+            hours=hours,
+            window_seconds=window_seconds,
+            aggregation=aggregation
+        )
+        return {"success": True, "data": data, "count": len(data)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取历史数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取历史数据失败: {str(e)}")
+
+
+@app.get("/api/data/chart")
+async def get_chart_data(
+    variable: str = Query(..., description="变量名"),
+    time_range: str = Query("1h", description="时间范围: 30m, 1h, 6h, 12h, 24h, 7d"),
+    aggregation: str = Query("mean", description="聚合函数")
+):
+    try:
+        if not db_manager:
+            raise HTTPException(status_code=503, detail="数据库未启用")
+
+        data = DataQuerier.get_chart_data(variable, time_range, aggregation)
+        return {"success": True, **data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取图表数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取图表数据失败: {str(e)}")
+
+
+@app.get("/api/collector/status")
+async def get_collector_status():
+    try:
+        if not data_collector:
+            return {"success": True, "running": False, "message": "数据采集器未启用"}
+
+        status = data_collector.get_status()
+        return {"success": True, **status}
+    except Exception as e:
+        logger.error(f"获取采集器状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取采集器状态失败: {str(e)}")
+
+
+@app.post("/api/collector/start")
+async def start_collector():
+    try:
+        if not data_collector:
+            raise HTTPException(status_code=503, detail="数据采集器未配置")
+
+        if not data_collector.running:
+            data_collector.start()
+            logger.info("数据采集器已启动")
+
+        return {"success": True, "message": "数据采集器已启动"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"启动采集器失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"启动采集器失败: {str(e)}")
+
+
+@app.post("/api/collector/stop")
+async def stop_collector():
+    try:
+        if not data_collector:
+            raise HTTPException(status_code=503, detail="数据采集器未配置")
+
+        if data_collector.running:
+            data_collector.stop()
+            logger.info("数据采集器已停止")
+
+        return {"success": True, "message": "数据采集器已停止"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"停止采集器失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"停止采集器失败: {str(e)}")

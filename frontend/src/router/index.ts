@@ -21,6 +21,22 @@ const router = createRouter({
       }
     },
     {
+      path: '/model',
+      name: 'model',
+      component: () => import('../views/ModelView.vue'),
+      meta: {
+        title: '3D模型 - 语音PLC控制'
+      }
+    },
+    {
+      path: '/data',
+      name: 'data',
+      component: () => import('../views/DataView.vue'),
+      meta: {
+        title: '数据可视化 - 语音PLC控制'
+      }
+    },
+    {
       path: '/config',
       name: 'config',
       component: () => import('../views/ConfigView.vue'),
@@ -39,7 +55,6 @@ const router = createRouter({
   ],
 })
 
-// 路由守卫，设置页面标题
 router.beforeEach((to, from, next) => {
   document.title = to.meta.title as string || '语音PLC控制'
   next()

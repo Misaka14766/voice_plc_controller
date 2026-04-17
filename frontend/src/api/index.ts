@@ -5,6 +5,18 @@ const api = axios.create({
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
+  },
+  paramsSerializer: (params) => {
+    const searchParams = new URLSearchParams()
+    for (const key in params) {
+      const value = params[key]
+      if (Array.isArray(value)) {
+        value.forEach(item => searchParams.append(key, item))
+      } else {
+        searchParams.append(key, value)
+      }
+    }
+    return searchParams.toString()
   }
 })
 
@@ -28,6 +40,9 @@ export interface PLCVariable {
   name: string
   type: string
   comment?: string
+  unit?: string
+  min?: number
+  max?: number
 }
 
 export interface HealthResponse {
@@ -64,13 +79,45 @@ export interface ConfigResponse {
   template_matching: boolean
   voice_input_enabled: boolean
   voice_output_enabled: boolean
+  db_enabled?: boolean
+  db_type?: string
+  data_collection_enabled?: boolean
 }
 
-// 对话接口
+export interface RealtimeDataItem {
+  name: string
+  value: number | null
+  timestamp?: string
+  unit?: string
+}
+
+export interface ChartDataResponse {
+  success: boolean
+  data: Array<{
+    timestamp: string
+    value: number
+    variable_name?: string
+    data_type?: string
+  }>
+  count?: number
+  aggregation?: string
+  time_range?: string
+}
+
+export interface CollectorStatusResponse {
+  success: boolean
+  running: boolean
+  interval_ms?: number
+  variables_count?: number
+  buffer_size?: number
+  batch_size?: number
+  variables?: string[]
+  message?: string
+}
+
 export const sendChat = (text: string) =>
   api.post<ChatResponse>('/api/chat', { text })
 
-// PLC接口
 export const readPLC = (variable: string, dataType: string = 'INT') =>
   api.post<{ success: boolean; value?: any; error?: string }>('/api/plc/read', {
     variable,
@@ -87,27 +134,52 @@ export const writePLC = (variable: string, value: any, dataType: string = 'INT')
 export const listPLCVariables = () =>
   api.get<{ success: boolean; variables: PLCVariable[]; error?: string }>('/api/plc/variables')
 
-// TTS接口
 export const synthesizeTTS = (text: string) =>
   api.post<{ audio: string }>('/api/tts', { text })
 
-// 清空历史
 export const clearHistory = () =>
   api.post<{ success: boolean }>('/api/clear')
 
-// 健康检查
 export const healthCheck = () =>
   api.get<HealthResponse>('/api/health')
 
-// 系统状态
 export const getStatus = () =>
   api.get<SystemStatus>('/api/status')
 
-// 对话历史
 export const getHistory = () =>
   api.get<HistoryResponse>('/api/history')
 
-// 配置查询
 export const getConfig = () =>
   api.get<ConfigResponse>('/api/config')
 
+export const getRealtimeData = (variables: string[]) =>
+  api.get<{ success: boolean; data: RealtimeDataItem[] }>('/api/data/realtime', {
+    params: { variables }
+  })
+
+export const getHistoryData = (
+  variable: string,
+  hours: number = 1,
+  aggregation: string = 'mean'
+) =>
+  api.get<{ success: boolean; data: any[]; count: number }>('/api/data/history', {
+    params: { variable, hours, aggregation }
+  })
+
+export const getChartData = (
+  variable: string,
+  timeRange: string = '1h',
+  aggregation: string = 'mean'
+) =>
+  api.get<ChartDataResponse>('/api/data/chart', {
+    params: { variable, time_range: timeRange, aggregation }
+  })
+
+export const getCollectorStatus = () =>
+  api.get<CollectorStatusResponse>('/api/collector/status')
+
+export const startCollector = () =>
+  api.post<{ success: boolean; message: string }>('/api/collector/start')
+
+export const stopCollector = () =>
+  api.post<{ success: boolean; message: string }>('/api/collector/stop')

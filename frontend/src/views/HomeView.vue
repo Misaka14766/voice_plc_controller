@@ -196,44 +196,6 @@ const startRecording = async () => {
   if (recording.value) return
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    mediaRecorder = new MediaRecorder(stream)
-    audioChunks = []
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        audioChunks.push(event.data)
-      }
-    }
-
-    mediaRecorder.start(100)
-    recording.value = true
-  } catch (error) {
-    console.error('录音失败:', error)
-    ElMessage.error('录音权限被拒绝或设备不可用')
-  }
-}
-
-// 停止录音
-const stopRecording = async () => {
-  if (!recording.value || !mediaRecorder) return
-
-  recording.value = false
-  mediaRecorder.stop()
-
-  mediaRecorder.onstop = async () => {
-    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' })
-    await sendAudio(audioBlob)
-
-    // 停止媒体流
-    const stream = mediaRecorder?.stream
-    stream?.getTracks().forEach(track => track.stop())
-  }
-}
-
-// 发送音频数据
-const sendAudio = async (audioBlob: Blob) => {
-  try {
     // 连接WebSocket
     const wsUrl = import.meta.env.VITE_API_BASE_URL?.replace('http', 'ws') + '/ws/asr'
     ws = new WebSocket(wsUrl)
@@ -244,7 +206,10 @@ const sendAudio = async (audioBlob: Blob) => {
 
     ws.onmessage = async (event) => {
       const data = JSON.parse(event.data)
-      if (data.type === 'final') {
+      if (data.type === 'partial') {
+        // 收到部分识别结果，可以实时显示
+        console.log('实时识别:', data.text)
+      } else if (data.type === 'final') {
         // 收到最终识别结果
         if (data.text) {
           chatHistory.value.push({ role: 'user', content: data.text })
@@ -274,12 +239,16 @@ const sendAudio = async (audioBlob: Blob) => {
           }
         }
         ws?.close()
+      } else if (data.type === 'error') {
+        console.error('WebSocket错误:', data.text)
+        ElMessage.error(data.text)
       }
     }
 
     ws.onerror = (error) => {
       console.error('WebSocket错误:', error)
       ElMessage.error('语音识别服务连接失败')
+      recording.value = false
     }
 
     ws.onclose = () => {
@@ -287,31 +256,71 @@ const sendAudio = async (audioBlob: Blob) => {
     }
 
     // 等待WebSocket连接建立
-    await new Promise((resolve) => {
+    await new Promise((resolve, reject) => {
       const timer = setInterval(() => {
         if (ws?.readyState === WebSocket.OPEN) {
           clearInterval(timer)
           resolve(null)
+        } else if (ws?.readyState === WebSocket.CLOSED || ws?.readyState === WebSocket.CLOSING) {
+          clearInterval(timer)
+          reject(new Error('WebSocket连接失败'))
         }
       }, 100)
     })
 
-    // 发送音频数据
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const audioData = e.target?.result as ArrayBuffer
-      const base64Data = btoa(String.fromCharCode(...new Uint8Array(audioData)))
-      
-      ws?.send(JSON.stringify({
+    // 获取麦克风权限并开始录音
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    mediaRecorder = new MediaRecorder(stream)
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0 && ws?.readyState === WebSocket.OPEN) {
+        // 实时发送音频数据
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const audioData = e.target?.result as ArrayBuffer
+          const base64Data = btoa(String.fromCharCode(...new Uint8Array(audioData)))
+          
+          ws?.send(JSON.stringify({
+            type: 'audio',
+            data: base64Data,
+            is_final: false
+          }))
+        }
+        reader.readAsArrayBuffer(event.data)
+      }
+    }
+
+    mediaRecorder.start(100) // 每100ms发送一次数据
+    recording.value = true
+  } catch (error) {
+    console.error('录音失败:', error)
+    ElMessage.error('录音权限被拒绝或设备不可用')
+    if (ws) {
+      ws.close()
+    }
+  }
+}
+
+// 停止录音
+const stopRecording = async () => {
+  if (!recording.value || !mediaRecorder) return
+
+  recording.value = false
+  mediaRecorder.stop()
+
+  mediaRecorder.onstop = async () => {
+    // 发送最终音频数据标记
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
         type: 'audio',
-        data: base64Data,
+        data: '',
         is_final: true
       }))
     }
-    reader.readAsArrayBuffer(audioBlob)
-  } catch (error) {
-    console.error('发送音频失败:', error)
-    ElMessage.error('语音识别失败，请重试')
+
+    // 停止媒体流
+    const stream = mediaRecorder?.stream
+    stream?.getTracks().forEach(track => track.stop())
   }
 }
 

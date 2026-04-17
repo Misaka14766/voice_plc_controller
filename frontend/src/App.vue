@@ -23,6 +23,14 @@
             <el-icon><Monitor /></el-icon>
             <span>PLC监控</span>
           </el-menu-item>
+          <el-menu-item index="/model">
+            <el-icon><Box /></el-icon>
+            <span>3D模型</span>
+          </el-menu-item>
+          <el-menu-item index="/data">
+            <el-icon><DataLine /></el-icon>
+            <span>数据可视化</span>
+          </el-menu-item>
           <el-menu-item index="/config">
             <el-icon><Setting /></el-icon>
             <span>配置管理</span>
@@ -48,7 +56,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChatDotSquare, Monitor, Setting, InfoFilled } from '@element-plus/icons-vue'
+import { ChatDotSquare, Monitor, Box, DataLine, Setting, InfoFilled } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -123,7 +131,6 @@ onMounted(() => {
   font-size: 14px;
 }
 
-/* 响应式设计 */
 @media (max-width: 768px) {
   .header-content {
     flex-direction: column;
