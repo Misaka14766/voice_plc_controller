@@ -12,7 +12,7 @@
               </div>
             </div>
           </template>
-          <div ref="containerRef" class="model-container"></div>
+          <div ref="containerRef" class="model-container" @mousemove="onMouseMove" @mouseleave="onMouseLeave"></div>
           <div v-if="loading" class="loading-overlay">
             <el-icon class="is-loading"><Loading /></el-icon>
             <span>加载模型中...</span>
@@ -21,6 +21,13 @@
             <el-icon :size="64"><Box /></el-icon>
             <p>请将 GLB 模型文件放入 <code>public/models/</code> 目录</p>
             <p class="tip">文件名应命名为 <code>tank.glb</code></p>
+          </div>
+          <div v-show="tooltip.visible" class="model-tooltip" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }">
+            <div class="tooltip-title">{{ tooltip.title }}</div>
+            <div class="tooltip-value">
+              <span class="value">{{ tooltip.value }}</span>
+              <span class="unit">{{ tooltip.unit }}</span>
+            </div>
           </div>
         </el-card>
       </el-col>
@@ -64,13 +71,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, reactive } from 'vue'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { ElMessage } from 'element-plus'
 import { Refresh, FullScreen, Loading, Box } from '@element-plus/icons-vue'
 import { getConfig, listPLCVariables, getRealtimeData } from '../api'
+import { MODEL_COMPONENT_MAPPINGS } from '../config/modelMappings'
 
 const containerRef = ref<HTMLElement | null>(null)
 const loading = ref(false)
@@ -80,6 +88,15 @@ const showWireframe = ref(false)
 const realtimeData = ref<any[]>([])
 const modelVariables = ref<any[]>([])
 
+const tooltip = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  title: '',
+  value: '',
+  unit: ''
+})
+
 let scene: THREE.Scene
 let camera: THREE.PerspectiveCamera
 let renderer: THREE.WebGLRenderer
@@ -87,6 +104,10 @@ let controls: OrbitControls
 let model: THREE.Object3D
 let animationId: number
 let refreshInterval: number
+let raycaster: THREE.Raycaster
+let mouse: THREE.Vector2
+let hoveredObject: THREE.Object3D | null = null
+let originalMaterials: Map<THREE.Mesh, THREE.Material | THREE.Material[]> = new Map()
 
 const MODEL_PATH = '/models/tank.glb'
 
@@ -136,6 +157,9 @@ const initThree = () => {
   controls.autoRotate = autoRotate.value
   controls.autoRotateSpeed = 2
 
+  raycaster = new THREE.Raycaster()
+  mouse = new THREE.Vector2()
+
   const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6)
   hemiLight.position.set(0, 20, 0)
   scene.add(hemiLight)
@@ -176,8 +200,11 @@ const initThree = () => {
       model = gltf.scene
       model.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {
-          child.castShadow = true
-          child.receiveShadow = true
+          const mesh = child as THREE.Mesh
+          mesh.castShadow = true
+          mesh.receiveShadow = true
+          originalMaterials.set(mesh, mesh.material)
+          console.log('模型部件名称:', child.name)
         }
       })
       scene.add(model)
@@ -249,6 +276,103 @@ const toggleFullscreen = () => {
   }
 }
 
+const onMouseMove = (event: MouseEvent) => {
+  if (!containerRef.value || !model || !raycaster) return
+
+  const rect = containerRef.value.getBoundingClientRect()
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+
+  raycaster.setFromCamera(mouse, camera)
+
+  const meshes: THREE.Mesh[] = []
+  model.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      meshes.push(child as THREE.Mesh)
+    }
+  })
+
+  const intersects = raycaster.intersectObjects(meshes, false)
+
+  const firstIntersect = intersects[0]
+  if (firstIntersect) {
+    const intersected = firstIntersect.object as THREE.Mesh
+    const objectName = intersected.name || (intersected.parent && intersected.parent.name) || ''
+    console.log('悬停部件:', objectName || '(无名称)', '| 完整路径:', intersected.parent?.name || '')
+
+    if (hoveredObject !== intersected) {
+      if (hoveredObject) {
+        resetObjectHighlight(hoveredObject as THREE.Mesh)
+      }
+      highlightObject(intersected)
+      hoveredObject = intersected
+    }
+
+    const mapping = findComponentMapping(objectName)
+    console.log('查找映射:', objectName, '->', mapping)
+    if (mapping) {
+      console.log('realtimeData 变量名列表:', realtimeData.value.map(d => d.name))
+      const varData = realtimeData.value.find(d => d.name === mapping.variable)
+      console.log('查找变量:', mapping.variable, '->', varData)
+      tooltip.visible = true
+      tooltip.x = event.clientX - rect.left + 15
+      tooltip.y = event.clientY - rect.top + 15
+      tooltip.title = mapping.label
+      tooltip.value = varData ? formatValue(varData.value) : '--'
+      tooltip.unit = varData?.unit || ''
+    } else {
+      tooltip.visible = false
+    }
+  } else {
+    if (hoveredObject) {
+      resetObjectHighlight(hoveredObject as THREE.Mesh)
+      hoveredObject = null
+    }
+    tooltip.visible = false
+  }
+}
+
+const onMouseLeave = () => {
+  if (hoveredObject) {
+    resetObjectHighlight(hoveredObject as THREE.Mesh)
+    hoveredObject = null
+  }
+  tooltip.visible = false
+}
+
+const findComponentMapping = (objectName: string): { variable: string; label: string } | null => {
+  for (const [key, value] of Object.entries(MODEL_COMPONENT_MAPPINGS)) {
+    if (objectName.toLowerCase().includes(key.toLowerCase())) {
+      return value
+    }
+  }
+  return null
+}
+
+const highlightObject = (mesh: THREE.Mesh) => {
+  const originalMaterial = originalMaterials.get(mesh)
+  if (!originalMaterial) return
+
+  const highlightMaterial = new THREE.MeshStandardMaterial({
+    color: 0x00ff88,
+    emissive: 0x00ff88,
+    emissiveIntensity: 0.3,
+    metalness: 0.5,
+    roughness: 0.5,
+    transparent: true,
+    opacity: 0.9
+  })
+
+  mesh.material = highlightMaterial
+}
+
+const resetObjectHighlight = (mesh: THREE.Mesh) => {
+  const originalMaterial = originalMaterials.get(mesh)
+  if (originalMaterial) {
+    mesh.material = originalMaterial
+  }
+}
+
 const fetchData = async () => {
   try {
     const configRes = await getConfig()
@@ -263,13 +387,19 @@ const fetchData = async () => {
       const varNames = varsRes.data.variables.map((v: any) => v.name)
       const dataRes = await getRealtimeData(varNames)
       if (dataRes.data.success) {
-        realtimeData.value = dataRes.data.data.map((item: any, idx: number) => ({
-          ...item,
-          comment: varsRes.data.variables[idx]?.comment || '',
-          unit: varsRes.data.variables[idx]?.unit || '',
-          min: varsRes.data.variables[idx]?.min,
-          max: varsRes.data.variables[idx]?.max
-        }))
+        const dataMap = dataRes.data.data as Record<string, any>
+        realtimeData.value = varsRes.data.variables.map((v: any, idx: number) => {
+          const item = dataMap[v.name] || {}
+          return {
+            name: v.name,
+            value: item.value ?? null,
+            timestamp: item.timestamp,
+            comment: v.comment || '',
+            unit: v.unit || '',
+            min: v.min,
+            max: v.max
+          }
+        })
       }
     }
   } catch (error) {
@@ -412,5 +542,41 @@ onUnmounted(() => {
 
 .controls-panel {
   margin-bottom: 20px;
+}
+
+.model-tooltip {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(0, 255, 136, 0.5);
+  border-radius: 8px;
+  padding: 12px 16px;
+  pointer-events: none;
+  z-index: 100;
+  min-width: 120px;
+  box-shadow: 0 4px 12px rgba(0, 255, 136, 0.2);
+}
+
+.tooltip-title {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+
+.tooltip-value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.tooltip-value .value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #00ff88;
+  font-family: 'Roboto Mono', monospace;
+}
+
+.tooltip-value .unit {
+  font-size: 12px;
+  color: #67c23a;
 }
 </style>
