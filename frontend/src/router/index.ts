@@ -52,6 +52,22 @@ const router = createRouter({
         title: '关于 - 语音PLC控制'
       }
     },
+    {
+      path: '/database',
+      name: 'database',
+      component: () => import('../views/DatabaseView.vue'),
+      meta: {
+        title: '数据库管理 - 语音PLC控制'
+      }
+    },
+    {
+      path: '/knowledge',
+      name: 'knowledge',
+      component: () => import('../views/KnowledgeView.vue'),
+      meta: {
+        title: '知识库 - 语音PLC控制'
+      }
+    },
   ],
 })
 

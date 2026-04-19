@@ -167,6 +167,50 @@ class BeckhoffPLC(BasePLC):
                 all_vals.update(vals)
             return all_vals
 
+    def get_device_info(self) -> Dict[str, Any]:
+        """获取设备信息"""
+        info = {
+            "model": "Beckhoff C6030",
+            "system": "TwinCAT 3",
+            "ip_address": settings.PLC_IP_ADDRESS,
+            "ams_net_id": settings.PLC_AMS_NET_ID,
+            "ams_port": settings.PLC_AMS_PORT,
+            "connected": self.is_connected(),
+            "model_link": "https://www.beckhoff.com/en-en/products/ipc/c-series/c6030/",
+            "system_link": "https://www.beckhoff.com/en-en/products/automation/twincat/twincat-3/",
+            "image_url": "https://multimedia.beckhoff.com/media/c6030_main1__web.jpg.webp"
+        }
+        if self.is_connected():
+            try:
+                device_info = self._conn.read_device_info()
+                if hasattr(device_info, 'name'):
+                    info['device_name'] = device_info.name
+                if hasattr(device_info, 'version'):
+                    info['version'] = device_info.version
+            except Exception as e:
+                print(f"获取设备信息失败: {e}")
+        return info
+
+    def read_list(self, var_list: List[str]) -> Dict[str, Any]:
+        """批量读取变量"""
+        if not self.is_connected():
+            return {}
+        try:
+            return self._conn.read_list_by_name(var_list)
+        except Exception as e:
+            print(f"批量读取失败: {e}")
+            return {}
+
+    def write_list(self, var_dict: Dict[str, Any]) -> Dict[str, str]:
+        """批量写入变量"""
+        if not self.is_connected():
+            return {var: "PLC not connected" for var in var_dict}
+        try:
+            return self._conn.write_list_by_name(var_dict)
+        except Exception as e:
+            print(f"批量写入失败: {e}")
+            return {var: str(e) for var in var_dict}
+
     # 保留原有异步生成器方法（可选）
     async def async_monitor_generator(self, variables: List[Tuple[str, str]], interval_ms: int = 100):
         if not self.is_connected():

@@ -142,6 +142,35 @@ class MockPLC(BasePLC):
                 all_vals.update(vals)
             return all_vals
 
+    def get_device_info(self) -> Dict[str, Any]:
+        """获取设备信息"""
+        return {
+            "model": "Mock PLC",
+            "system": "Mock System",
+            "ip_address": "127.0.0.1",
+            "connected": self.is_connected(),
+            "modelLink": "https://www.beckhoff.com/en-us/products/automation/plc/beckhoff-c6030.html",
+            "systemLink": "https://www.beckhoff.com/en-us/products/automation/controller/beckhoff-twincat-3.html"
+        }
+
+    def read_list(self, var_list: List[str]) -> Dict[str, Any]:
+        """批量读取变量"""
+        result = {}
+        for var_name in var_list:
+            result[var_name] = self._state.get(var_name)
+        return result
+
+    def write_list(self, var_dict: Dict[str, Any]) -> Dict[str, str]:
+        """批量写入变量"""
+        result = {}
+        for var_name, value in var_dict.items():
+            if var_name in self._state:
+                self._state[var_name] = value
+                result[var_name] = "no error"
+            else:
+                result[var_name] = "variable not found"
+        return result
+
     async def async_monitor_generator(self, variables: List[Tuple[str, str]], interval_ms: int = 100):
         interval = interval_ms / 1000.0
         while True:

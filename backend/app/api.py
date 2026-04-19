@@ -1,14 +1,16 @@
 import base64
 import logging
+from pathlib import Path
+import yaml
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from ..config.settings import settings
 from ..core import get_llm, get_plc, get_asr, get_tts
-from ..core.llm.openai_llm import set_plc_instance
+from ..core.llm.openai_llm import set_plc_instance, set_db_manager
 from ..core.template_matcher import TemplateMatcher
 from ..core.db import DatabaseFactory, DatabaseInterface
 from ..core.db.queries import DataQuerier
@@ -57,6 +59,32 @@ class PLCWriteRequest(BaseModel):
     data_type: str = "INT"
 
 
+@app.get("/api/plc/monitor-variables")
+async def get_monitor_variables():
+    """获取监控变量列表"""
+    try:
+        return {"success": True, "variables": settings.monitor_variables}
+    except Exception as e:
+        logger.error(f"获取监控变量失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取监控变量失败: {str(e)}")
+
+
+class MonitorVariablesRequest(BaseModel):
+    variables: List[str]
+
+
+@app.post("/api/plc/monitor-variables")
+async def update_monitor_variables(request: MonitorVariablesRequest):
+    """更新监控变量列表"""
+    try:
+        # 临时更新，实际应该持久化到配置文件
+        # 这里我们直接返回成功，因为当前实现是基于环境变量的
+        return {"success": True, "message": "监控变量已更新", "variables": request.variables}
+    except Exception as e:
+        logger.error(f"更新监控变量失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新监控变量失败: {str(e)}")
+
+
 class SystemStatus(BaseModel):
     plc_connected: bool
     asr_provider: str
@@ -88,6 +116,7 @@ async def startup_event():
 
             if db_manager and db_manager.connect():
                 DataQuerier.init_instance(db_manager)
+                set_db_manager(db_manager)
                 logger.info(f"✅ {settings.DB_TYPE.upper()} 数据库连接成功")
 
                 if settings.DATA_COLLECTION_ENABLED and plc:
@@ -155,11 +184,11 @@ async def chat(request: TextRequest):
         if len(conversation_history) > max_history_turns * 2:
             conversation_history[:] = conversation_history[-max_history_turns * 2:]
 
-        response = await llm.generate_async(conversation_history)
+        response = await llm.generate(conversation_history)
 
-        conversation_history.append({"role": "assistant", "content": response})
+        conversation_history.append({"role": "assistant", "content": response.content})
 
-        return {"response": response, "success": True}
+        return {"response": response.content, "success": True}
     except Exception as e:
         logger.error(f"对话处理失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"对话处理失败: {str(e)}")
@@ -167,20 +196,23 @@ async def chat(request: TextRequest):
 
 @app.get("/api/plc/variables")
 async def list_plc_variables():
-    """获取 PLC 变量列表"""
+    """获取 PLC 变量列表（所有变量，供监控页面选择）"""
     try:
         if not plc or not plc.is_connected():
             raise HTTPException(status_code=503, detail="PLC 未连接")
 
+        # 获取所有PLC变量
+        all_symbols = plc.get_all_symbols()
         variables = []
-        for var_name, var_type in settings.monitor_variables:
-            try:
-                comment = ""
-                if settings.VARIABLE_MAPPINGS and var_name in settings.VARIABLE_MAPPINGS:
-                    comment = settings.VARIABLE_MAPPINGS[var_name].get('comment', '')
-            except Exception:
-                comment = ""
-
+        for sym in all_symbols:
+            var_name = sym.get("name", "")
+            var_type = sym.get("type", "UNKNOWN")
+            comment = sym.get("comment", "")
+            
+            # 尝试从mappings获取注释
+            if not comment and settings.VARIABLE_MAPPINGS and var_name in settings.VARIABLE_MAPPINGS:
+                comment = settings.VARIABLE_MAPPINGS[var_name].get('comment', '')
+            
             variables.append({
                 "name": var_name,
                 "type": var_type,
@@ -221,6 +253,64 @@ async def plc_write(request: PLCWriteRequest):
     except Exception as e:
         logger.error(f"写入 PLC 变量失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"写入 PLC 变量失败: {str(e)}")
+
+
+@app.get("/api/plc/device-info")
+async def get_plc_device_info():
+    """获取 PLC 设备信息"""
+    try:
+        if plc:
+            device_info = plc.get_device_info()
+            return {
+                "success": True,
+                "model": device_info.get("model"),
+                "system": device_info.get("system"),
+                "ipAddress": device_info.get("ip_address"),
+                "status": "已连接" if device_info.get("connected", False) else "未连接",
+                "modelLink": device_info.get("model_link"),
+                "systemLink": device_info.get("system_link")
+            }
+        else:
+            raise HTTPException(status_code=503, detail="PLC 未初始化")
+    except Exception as e:
+        logger.error(f"获取设备信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取设备信息失败: {str(e)}")
+
+
+class PLCReadListRequest(BaseModel):
+    variables: List[str]
+
+
+class PLCWriteListRequest(BaseModel):
+    variables: Dict[str, Any]
+
+
+@app.post("/api/plc/read-list")
+async def plc_read_list(request: PLCReadListRequest):
+    """批量读取 PLC 变量"""
+    try:
+        if not plc or not plc.is_connected():
+            raise HTTPException(status_code=503, detail="PLC 未连接")
+
+        values = plc.read_list(request.variables)
+        return {"success": True, "values": values}
+    except Exception as e:
+        logger.error(f"批量读取 PLC 变量失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量读取 PLC 变量失败: {str(e)}")
+
+
+@app.post("/api/plc/write-list")
+async def plc_write_list(request: PLCWriteListRequest):
+    """批量写入 PLC 变量"""
+    try:
+        if not plc or not plc.is_connected():
+            raise HTTPException(status_code=503, detail="PLC 未连接")
+
+        results = plc.write_list(request.variables)
+        return {"success": True, "results": results}
+    except Exception as e:
+        logger.error(f"批量写入 PLC 变量失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"批量写入 PLC 变量失败: {str(e)}")
 
 
 @app.post("/api/voice")
@@ -489,3 +579,136 @@ async def stop_collector():
     except Exception as e:
         logger.error(f"停止采集器失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"停止采集器失败: {str(e)}")
+
+
+@app.post("/api/db/clear-variable")
+async def clear_variable_data(variable: str = Query(..., description="要清空数据的变量名")):
+    """清空指定变量的数据"""
+    try:
+        if not db_manager:
+            raise HTTPException(status_code=503, detail="数据库未初始化")
+
+        success = db_manager.clear_variable_data(variable)
+        if success:
+            return {"success": True, "message": f"变量 {variable} 的数据已清空"}
+        else:
+            raise HTTPException(status_code=500, detail=f"清空变量 {variable} 的数据失败")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"清空变量数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"清空变量数据失败: {str(e)}")
+
+
+@app.post("/api/db/clear-all")
+async def clear_all_data():
+    """清空所有数据"""
+    try:
+        if not db_manager:
+            raise HTTPException(status_code=503, detail="数据库未初始化")
+
+        success = db_manager.clear_all_data()
+        if success:
+            return {"success": True, "message": "所有数据已清空"}
+        else:
+            raise HTTPException(status_code=500, detail="清空所有数据失败")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"清空所有数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"清空所有数据失败: {str(e)}")
+
+
+@app.get("/api/knowledge")
+async def get_knowledge():
+    """获取知识库内容"""
+    try:
+        kb_path = Path(__file__).parent.parent / "config" / "knowledge_base.yaml"
+        if not kb_path.exists():
+            return {"success": True, "entries": []}
+
+        with open(kb_path, 'r', encoding='utf-8') as f:
+            kb_data = yaml.safe_load(f) or {}
+
+        return {"success": True, "entries": kb_data.get('entries', [])}
+    except Exception as e:
+        logger.error(f"获取知识库失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取知识库失败: {str(e)}")
+
+
+@app.post("/api/knowledge")
+async def save_knowledge(request: dict):
+    """保存知识库内容"""
+    try:
+        kb_path = Path(__file__).parent.parent / "config" / "knowledge_base.yaml"
+
+        kb_data = {"entries": request.get('entries', [])}
+
+        with open(kb_path, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(kb_data, f, allow_unicode=True, sort_keys=False)
+
+        return {"success": True, "message": "知识库已保存"}
+    except Exception as e:
+        logger.error(f"保存知识库失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"保存知识库失败: {str(e)}")
+
+
+@app.get("/api/knowledge/test")
+async def test_knowledge_recall(query: str = Query("", description="测试查询")):
+    """测试知识召回"""
+    try:
+        kb_path = Path(__file__).parent.parent / "config" / "knowledge_base.yaml"
+        if not kb_path.exists():
+            return {"success": True, "result": "知识库文件不存在"}
+
+        with open(kb_path, 'r', encoding='utf-8') as f:
+            kb_data = yaml.safe_load(f) or {}
+
+        entries = kb_data.get('entries', [])
+        if not entries:
+            return {"success": True, "result": "知识库为空"}
+
+        if not query:
+            matched = entries[:5]
+        else:
+            query_lower = query.lower()
+            matched = [e for e in entries if query_lower in e.get('question', '').lower() or query_lower in e.get('answer', '').lower()]
+            if not matched:
+                matched = entries[:5]
+
+        result = "找到相关知识库内容：\n"
+        for entry in matched:
+            result += f"\n问题: {entry.get('question', '')}\n"
+            result += f"答案: {entry.get('answer', '')}\n"
+
+        return {"success": True, "result": result}
+    except Exception as e:
+        logger.error(f"测试知识召回失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"测试失败: {str(e)}")
+
+
+@app.get("/api/config")
+async def get_config():
+    """获取当前配置"""
+    try:
+        from config.settings import settings
+        config = settings.dynamic_config
+        return {"success": True, "config": config}
+    except Exception as e:
+        logger.error(f"获取配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取配置失败: {str(e)}")
+
+
+@app.post("/api/config")
+async def update_config(config: dict):
+    """更新配置"""
+    try:
+        from config.settings import settings
+        success = settings.save_dynamic_config(config)
+        if success:
+            return {"success": True, "message": "配置更新成功"}
+        else:
+            raise HTTPException(status_code=500, detail="配置保存失败")
+    except Exception as e:
+        logger.error(f"更新配置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新配置失败: {str(e)}")

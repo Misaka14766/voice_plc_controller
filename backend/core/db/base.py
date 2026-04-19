@@ -51,3 +51,13 @@ class DatabaseInterface(ABC):
     @abstractmethod
     def get_status(self) -> Dict[str, Any]:
         pass
+
+    @abstractmethod
+    def clear_variable_data(self, variable_name: str) -> bool:
+        """清空指定变量的数据"""
+        pass
+
+    @abstractmethod
+    def clear_all_data(self) -> bool:
+        """清空所有数据"""
+        pass

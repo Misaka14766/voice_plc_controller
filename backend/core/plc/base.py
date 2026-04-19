@@ -68,3 +68,18 @@ class BasePLC(ABC):
     def get_monitored_values(self, group_id: Optional[str] = None) -> Dict[str, Any]:
         """获取最新监控值"""
         pass
+
+    @abstractmethod
+    def get_device_info(self) -> Dict[str, Any]:
+        """获取设备信息"""
+        pass
+
+    @abstractmethod
+    def read_list(self, var_list: List[str]) -> Dict[str, Any]:
+        """批量读取变量"""
+        pass
+
+    @abstractmethod
+    def write_list(self, var_dict: Dict[str, Any]) -> Dict[str, str]:
+        """批量写入变量"""
+        pass

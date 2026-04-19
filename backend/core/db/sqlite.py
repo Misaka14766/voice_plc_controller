@@ -271,3 +271,34 @@ class SQLiteDatabase(DatabaseInterface):
                 "db_path": self.db_path,
                 "error": str(e)
             }
+
+    def clear_variable_data(self, variable_name: str) -> bool:
+        """清空指定变量的数据"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("DELETE FROM plc_data WHERE variable_name = ?", (variable_name,))
+            affected_rows = cursor.rowcount
+            # 重置自增ID
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name='plc_data'")
+            self.connection.commit()
+            logger.info(f"已清空变量 {variable_name} 的数据，影响 {affected_rows} 条记录，自增ID已重置")
+            return True
+        except Exception as e:
+            logger.error(f"清空变量数据失败: {e}")
+            return False
+
+    def clear_all_data(self) -> bool:
+        """清空所有数据"""
+        try:
+            cursor = self.connection.cursor()
+            # 清空数据
+            cursor.execute("DELETE FROM plc_data")
+            affected_rows = cursor.rowcount
+            # 重置自增ID
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name='plc_data'")
+            self.connection.commit()
+            logger.info(f"已清空所有数据，影响 {affected_rows} 条记录，自增ID已重置")
+            return True
+        except Exception as e:
+            logger.error(f"清空所有数据失败: {e}")
+            return False

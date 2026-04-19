@@ -31,7 +31,15 @@
             <el-icon><DataLine /></el-icon>
             <span>数据可视化</span>
           </el-menu-item>
-          <el-menu-item index="/config">
+          <el-menu-item index="/database">
+            <el-icon><Coin /></el-icon>
+            <span>数据库管理</span>
+          </el-menu-item>
+          <el-menu-item index="/knowledge">
+            <el-icon><Reading /></el-icon>
+            <span>知识库</span>
+          </el-menu-item>
+            <el-menu-item index="/config">
             <el-icon><Setting /></el-icon>
             <span>配置管理</span>
           </el-menu-item>
@@ -56,7 +64,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChatDotSquare, Monitor, Box, DataLine, Setting, InfoFilled } from '@element-plus/icons-vue'
+import { ChatDotSquare, Monitor, Box, DataLine, Setting, InfoFilled, Reading, Coin } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()

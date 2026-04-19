@@ -86,15 +86,69 @@
 
       <!-- 快捷指令 -->
       <div class="quick-commands">
-        <el-divider content-position="left">快捷指令</el-divider>
-        <el-tag
-          v-for="command in quickCommands"
-          :key="command"
-          @click="sendQuickCommand(command)"
-          class="quick-command-tag"
-        >
-          {{ command }}
-        </el-tag>
+        <el-divider content-position="left">
+          <span v-if="!editingCommands">快捷指令</span>
+          <span v-else>编辑快捷指令</span>
+          <el-button
+            v-if="!editingCommands"
+            type="primary"
+            size="small"
+            link
+            @click="startEditingCommands"
+            style="margin-left: 10px"
+          >
+            <el-icon><Edit /></el-icon> 编辑
+          </el-button>
+          <template v-else>
+            <el-button type="success" size="small" link @click="cancelEditingCommands">
+              <el-icon><Check /></el-icon> 完成
+            </el-button>
+          </template>
+        </el-divider>
+        <div v-if="editingCommands" class="editing-commands">
+          <div v-for="(command, index) in quickCommands" :key="index" class="command-edit-item">
+            <template v-if="editingIndex === index">
+              <el-input v-model="editingValue" size="small" style="flex: 1" @keyup.enter="saveEditCommand(index)" />
+              <el-button type="success" size="small" link @click="saveEditCommand(index)">
+                <el-icon><Check /></el-icon>
+              </el-button>
+              <el-button type="danger" size="small" link @click="cancelEditCommand">
+                <el-icon><Close /></el-icon>
+              </el-button>
+            </template>
+            <template v-else>
+              <el-tag @click="sendQuickCommand(command)" class="quick-command-tag">{{ command }}</el-tag>
+              <el-button type="primary" size="small" link @click="startEditCommand(index)">
+                <el-icon><Edit /></el-icon>
+              </el-button>
+              <el-button type="danger" size="small" link @click="deleteCommand(index)">
+                <el-icon><Close /></el-icon>
+              </el-button>
+            </template>
+          </div>
+          <div v-if="addingCommand" class="command-edit-item">
+            <el-input v-model="newCommandValue" size="small" style="flex: 1" placeholder="输入新指令" @keyup.enter="confirmAddCommand" />
+            <el-button type="success" size="small" link @click="confirmAddCommand">
+              <el-icon><Check /></el-icon>
+            </el-button>
+            <el-button type="danger" size="small" link @click="cancelAddCommand">
+              <el-icon><Close /></el-icon>
+            </el-button>
+          </div>
+          <el-button v-if="!addingCommand" type="primary" size="small" link @click="startAddCommand" style="margin-top: 10px">
+            <el-icon><Plus /></el-icon> 添加新指令
+          </el-button>
+        </div>
+        <div v-else>
+          <el-tag
+            v-for="command in quickCommands"
+            :key="command"
+            @click="sendQuickCommand(command)"
+            class="quick-command-tag"
+          >
+            {{ command }}
+          </el-tag>
+        </div>
       </div>
 
       <!-- 系统状态 -->
@@ -112,9 +166,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, onUnmounted } from 'vue'
-import { Mic } from '@element-plus/icons-vue'
+import { Mic, Plus, Edit, Check, Close } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { sendChat, synthesizeTTS, healthCheck, getHistory, clearHistory } from '../api'
+import { loadQuickCommands, saveQuickCommands } from '../config/quickCommands'
 
 const inputText = ref('')
 const chatHistory = ref<any[]>([])
@@ -127,14 +182,12 @@ const plcStatus = ref({
   llm_provider: ''
 })
 
-const quickCommands = [
-  '启动电机',
-  '停止电机',
-  '查看温度',
-  '设置温度为25度',
-  '查看压力',
-  'PLC状态'
-]
+const quickCommands = ref<string[]>(loadQuickCommands())
+const editingCommands = ref(false)
+const editingIndex = ref(-1)
+const editingValue = ref('')
+const addingCommand = ref(false)
+const newCommandValue = ref('')
 
 // WebSocket连接
 let ws: WebSocket | null = null
@@ -189,6 +242,73 @@ const sendText = async () => {
 const sendQuickCommand = (command: string) => {
   inputText.value = command
   sendText()
+}
+
+// 编辑快捷指令
+const startEditingCommands = () => {
+  editingCommands.value = true
+}
+
+const cancelEditingCommands = () => {
+  editingCommands.value = false
+  editingIndex.value = -1
+  addingCommand.value = false
+  loadQuickCommandsFromStorage()
+}
+
+const startEditCommand = (index: number) => {
+  editingIndex.value = index
+  editingValue.value = quickCommands.value[index] || ''
+}
+
+const saveEditCommand = async (index: number) => {
+  const trimmedValue = editingValue.value.trim()
+  if (trimmedValue) {
+    quickCommands.value[index] = trimmedValue
+  }
+  editingIndex.value = -1
+  await saveCommands()
+}
+
+const cancelEditCommand = () => {
+  editingIndex.value = -1
+}
+
+const startAddCommand = () => {
+  addingCommand.value = true
+  newCommandValue.value = ''
+}
+
+const confirmAddCommand = async () => {
+  if (newCommandValue.value.trim()) {
+    quickCommands.value.push(newCommandValue.value.trim())
+    await saveCommands()
+  }
+  addingCommand.value = false
+  newCommandValue.value = ''
+}
+
+const cancelAddCommand = () => {
+  addingCommand.value = false
+  newCommandValue.value = ''
+}
+
+const deleteCommand = async (index: number) => {
+  quickCommands.value.splice(index, 1)
+  await saveCommands()
+}
+
+const saveCommands = () => {
+  try {
+    saveQuickCommands(quickCommands.value)
+  } catch (error) {
+    console.error('保存快捷指令失败:', error)
+  }
+}
+
+// 加载快捷指令
+const loadQuickCommandsFromStorage = () => {
+  quickCommands.value = loadQuickCommands()
 }
 
 // 开始录音
@@ -371,6 +491,7 @@ const loadHistory = async () => {
 onMounted(() => {
   getSystemStatus()
   loadHistory()
+  loadQuickCommandsFromStorage()
   // 每10秒更新一次系统状态
   setInterval(getSystemStatus, 10000)
 })
@@ -571,6 +692,21 @@ onUnmounted(() => {
 .quick-command-tag:hover {
   transform: translateY(-2px);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.editing-commands {
+  padding: 10px 0;
+}
+
+.command-edit-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.command-edit-item .el-tag {
+  margin: 0;
 }
 
 .system-status {

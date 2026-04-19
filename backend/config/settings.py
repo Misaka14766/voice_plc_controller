@@ -78,6 +78,16 @@ class Settings:
     DATA_COLLECTION_BATCH_SIZE = int(os.getenv("DATA_COLLECTION_BATCH_SIZE", "10"))
 
     MAPPINGS_FILE = Path(__file__).parent / "variable_mappings.yaml"
+    DYNAMIC_CONFIG_FILE = Path(__file__).parent / "dynamic_config.yaml"
+
+    @property
+    def dynamic_config(self):
+        """读取动态配置文件"""
+        if not self.DYNAMIC_CONFIG_FILE.exists():
+            return {}
+        with open(self.DYNAMIC_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+        return data or {}
 
     @property
     def mappings(self) -> dict:
@@ -92,6 +102,60 @@ class Settings:
         return self.mappings
 
     @property
+    def MONITOR_VARIABLES_STR(self):
+        """从动态配置读取监控变量"""
+        config = self.dynamic_config
+        return config.get('monitor', {}).get('variables', os.getenv("MONITOR_VARIABLES", ""))
+
+    @property
+    def MONITOR_INTERVAL_MS(self):
+        """从动态配置读取监控间隔"""
+        config = self.dynamic_config
+        return config.get('monitor', {}).get('interval_ms', int(os.getenv("MONITOR_INTERVAL_MS", "200")))
+
+    @property
+    def DATA_COLLECTION_ENABLED(self):
+        """从动态配置读取数据采集开关"""
+        config = self.dynamic_config
+        return config.get('data_collection', {}).get('enabled', os.getenv("DATA_COLLECTION_ENABLED", "false").lower() == "true")
+
+    @property
+    def DATA_COLLECTION_INTERVAL(self):
+        """从动态配置读取数据采集间隔"""
+        config = self.dynamic_config
+        return config.get('data_collection', {}).get('interval', int(os.getenv("DATA_COLLECTION_INTERVAL", "1000")))
+
+    @property
+    def DATA_COLLECTION_BATCH_SIZE(self):
+        """从动态配置读取批量写入大小"""
+        config = self.dynamic_config
+        return config.get('data_collection', {}).get('batch_size', int(os.getenv("DATA_COLLECTION_BATCH_SIZE", "10")))
+
+    @property
+    def USE_TEMPLATE_MATCHING(self):
+        """从动态配置读取模板匹配开关"""
+        config = self.dynamic_config
+        return config.get('interaction', {}).get('use_template_matching', os.getenv("USE_TEMPLATE_MATCHING", "true").lower() == "true")
+
+    @property
+    def VOICE_INPUT_ENABLED(self):
+        """从动态配置读取语音输入开关"""
+        config = self.dynamic_config
+        return config.get('interaction', {}).get('voice_input_enabled', os.getenv("VOICE_INPUT_ENABLED", "true").lower() == "true")
+
+    @property
+    def VOICE_OUTPUT_ENABLED(self):
+        """从动态配置读取语音输出开关"""
+        config = self.dynamic_config
+        return config.get('interaction', {}).get('voice_output_enabled', os.getenv("VOICE_OUTPUT_ENABLED", "true").lower() == "true")
+
+    @property
+    def PLC_TRIGGER_VAR(self):
+        """从动态配置读取PLC触发变量"""
+        config = self.dynamic_config
+        return config.get('plc', {}).get('trigger_var', os.getenv("PLC_TRIGGER_VAR", None))
+
+    @property
     def monitor_variables(self):
         if not self.MONITOR_VARIABLES_STR:
             return []
@@ -101,5 +165,15 @@ class Settings:
                 name, vtype = item.strip().split(':')
                 vars_list.append((name.strip(), vtype.strip().upper()))
         return vars_list
+
+    def save_dynamic_config(self, config_data):
+        """保存动态配置"""
+        try:
+            with open(self.DYNAMIC_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            print(f"保存动态配置失败: {e}")
+            return False
 
 settings = Settings()

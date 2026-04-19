@@ -152,9 +152,20 @@ export const getHistory = () =>
 export const getConfig = () =>
   api.get<ConfigResponse>('/api/config')
 
+export const updateConfig = (config: any) =>
+  api.post<{ success: boolean; message: string }>('/api/config', config)
+
 export const getRealtimeData = (variables: string[]) =>
   api.get<{ success: boolean; data: RealtimeDataItem[] }>('/api/data/realtime', {
     params: { variables }
+  })
+
+export const getMonitorVariables = () =>
+  api.get<{ success: boolean; variables: Array<[string, string]> }>('/api/plc/monitor-variables')
+
+export const updateMonitorVariables = (variables: string[]) =>
+  api.post<{ success: boolean; message: string; variables: string[] }>('/api/plc/monitor-variables', {
+    variables
   })
 
 export const getHistoryData = (
@@ -183,3 +194,24 @@ export const startCollector = () =>
 
 export const stopCollector = () =>
   api.post<{ success: boolean; message: string }>('/api/collector/stop')
+
+export const getPLCDeviceInfo = () =>
+  api.get<{ success: boolean; model?: string; system?: string; ipAddress?: string; status?: string; modelLink?: string; systemLink?: string; imageUrl?: string }>('/api/plc/device-info')
+
+export const readPLCList = (variables: string[]) =>
+  api.post<{ success: boolean; values: Record<string, any> }>('/api/plc/read-list', { variables })
+
+export const writePLCList = (variables: Record<string, any>) =>
+  api.post<{ success: boolean; results: Record<string, string> }>('/api/plc/write-list', { variables })
+
+export const clearVariableDataAPI = (variable: string) =>
+  api.post<{ success: boolean; message: string }>('/api/db/clear-variable', {}, { params: { variable } })
+
+export const clearAllDataAPI = () =>
+  api.post<{ success: boolean; message: string }>('/api/db/clear-all')
+
+export const getQuickCommands = () =>
+  api.get<{ success: boolean; commands: string[] }>('/api/quick-commands')
+
+export const saveQuickCommands = (commands: string[]) =>
+  api.post<{ success: boolean; message: string }>('/api/quick-commands', { commands })

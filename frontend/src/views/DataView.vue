@@ -197,7 +197,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from
 import { Refresh, DataLine, Download, Document, InfoFilled, DataAnalysis } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
-import { getConfig, getChartData, getCollectorStatus, listPLCVariables } from '../api'
+import { getConfig, getChartData, getCollectorStatus, getMonitorVariables } from '../api'
 
 const loading = ref(false)
 const chartRef = ref<HTMLElement>()
@@ -397,9 +397,9 @@ const loadConfig = async () => {
 
 const loadVariables = async () => {
   try {
-    const response = await listPLCVariables()
+    const response = await getMonitorVariables()
     if (response.data.success && response.data.variables) {
-      variables.value = response.data.variables.map((v: any) => v.name)
+      variables.value = response.data.variables.map((v: [string, string]) => v[0])
     }
   } catch (error) {
     console.error('获取变量列表失败:', error)

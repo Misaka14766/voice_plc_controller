@@ -77,7 +77,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { ElMessage } from 'element-plus'
 import { Refresh, FullScreen, Loading, Box } from '@element-plus/icons-vue'
-import { getConfig, listPLCVariables, getRealtimeData } from '../api'
+import { getConfig, getMonitorVariables, getRealtimeData } from '../api'
 import { MODEL_COMPONENT_MAPPINGS } from '../config/modelMappings'
 
 const containerRef = ref<HTMLElement | null>(null)
@@ -378,26 +378,26 @@ const fetchData = async () => {
     const configRes = await getConfig()
     if (!configRes.data.db_enabled) return
 
-    const varsRes = await listPLCVariables()
+    const varsRes = await getMonitorVariables()
     if (!varsRes.data.success) return
 
-    modelVariables.value = varsRes.data.variables
+    modelVariables.value = varsRes.data.variables.map((v: [string, string]) => ({
+      name: v[0],
+      type: v[1]
+    }))
 
     if (varsRes.data.variables.length > 0) {
-      const varNames = varsRes.data.variables.map((v: any) => v.name)
+      const varNames = varsRes.data.variables.map((v: [string, string]) => v[0])
       const dataRes = await getRealtimeData(varNames)
       if (dataRes.data.success) {
         const dataMap = dataRes.data.data as Record<string, any>
-        realtimeData.value = varsRes.data.variables.map((v: any, idx: number) => {
-          const item = dataMap[v.name] || {}
+        realtimeData.value = varsRes.data.variables.map((v: [string, string]) => {
+          const item = dataMap[v[0]] || {}
           return {
-            name: v.name,
+            name: v[0],
+            type: v[1],
             value: item.value ?? null,
-            timestamp: item.timestamp,
-            comment: v.comment || '',
-            unit: v.unit || '',
-            min: v.min,
-            max: v.max
+            timestamp: item.timestamp
           }
         })
       }

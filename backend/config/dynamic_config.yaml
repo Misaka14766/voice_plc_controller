@@ -1,0 +1,23 @@
+# 动态配置管理文件
+# 这些配置可以通过前端页面修改并立即生效
+
+# 监控配置
+monitor:
+  variables: "MAIN.WaterLevel:REAL, MAIN.Temperature:REAL"  # 监控变量列表，格式：变量名:类型
+  interval_ms: 1000  # 监控间隔（毫秒）
+
+# 数据采集配置
+data_collection:
+  enabled: true  # 是否启用数据采集
+  interval: 1000  # 采集间隔（毫秒）
+  batch_size: 10  # 批量写入大小
+
+# 交互配置
+interaction:
+  voice_input_enabled: true  # 是否启用语音输入
+  voice_output_enabled: true  # 是否启用语音输出
+  use_template_matching: true  # 是否使用模板匹配
+
+# PLC配置
+plc:
+  trigger_var: "MAIN.bVoiceTrigger"  # 语音触发变量
