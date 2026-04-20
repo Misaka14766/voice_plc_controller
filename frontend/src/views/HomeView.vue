@@ -77,7 +77,7 @@
                 @click="sendText"
                 :disabled="!inputText.trim()"
               >
-                <el-icon><PaperPlane /></el-icon>
+                <el-icon><Promotion /></el-icon>
               </el-button>
             </template>
           </el-input>
@@ -205,7 +205,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, onUnmounted, computed } from 'vue'
-import { Mic, Plus, Edit, Check, Close, User, ElementPlus, Upload } from '@element-plus/icons-vue'
+import { Mic, Plus, Edit, Check, Close, User, ElementPlus, Upload, Promotion } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { sendChat, synthesizeTTS, healthCheck, getHistory, clearHistory } from '../api'
 import { loadQuickCommands, saveQuickCommands } from '../config/quickCommands'

@@ -71,9 +71,9 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, from) => {
   document.title = to.meta.title as string || '语音PLC控制'
-  next()
+  return true
 })
 
 export default router

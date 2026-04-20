@@ -61,6 +61,13 @@ export interface SystemStatus {
   template_matching: boolean
 }
 
+export interface SystemMetrics {
+  cpu: number
+  memory: number
+  network: number
+  uptime: string
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -215,3 +222,6 @@ export const getQuickCommands = () =>
 
 export const saveQuickCommands = (commands: string[]) =>
   api.post<{ success: boolean; message: string }>('/api/quick-commands', { commands })
+
+export const getSystemMetrics = () =>
+  api.get<SystemMetrics>('/api/system/metrics')

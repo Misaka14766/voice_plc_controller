@@ -53,7 +53,7 @@
       <div class="carousel-indicators">
         <div
           v-for="(item, index) in carouselItems"
-          :key="index"
+          :key="item.title"
           class="indicator"
           :class="{ active: index === currentIndex }"
           @click="goToSlide(index)"
@@ -68,15 +68,14 @@
       <div class="footer-left">
         <span class="footer-text">PLC科创实验室 v1.0</span>
       </div>
-      <div class="footer-center">
-        <div class="auto-play-controls">
-          <el-button :icon="isPlaying ? VideoPause : VideoPlay" circle @click="toggleAutoPlay" />
-          <span class="play-label">{{ isPlaying ? '自动播放中' : '已暂停' }}</span>
-        </div>
-      </div>
       <div class="footer-right">
         <span class="scan-line"></span>
       </div>
+    </div>
+
+    <div class="play-controls" @click="toggleAutoPlay">
+      <el-button :icon="isPlaying ? VideoPause : VideoPlay" circle />
+      <span class="play-label">{{ isPlaying ? '自动播放中' : '已暂停' }}</span>
     </div>
 
     <div class="corner-decoration top-right">
@@ -98,21 +97,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, h } from 'vue'
-import { VideoPlay, VideoPause } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, onUnmounted, h, nextTick } from 'vue'
+import { VideoPlay, VideoPause, Monitor } from '@element-plus/icons-vue'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import * as echarts from 'echarts'
+import { getStatus, getChartData, getMonitorVariables, getSystemMetrics } from '@/api'
 
-const emit = defineEmits<{
-  exit: []
-}>()
-
+const emit = defineEmits(['exit'])
 const currentIndex = ref(0)
 const carouselDirection = ref('right')
 const isPlaying = ref(true)
 const currentTime = ref('')
 const currentDate = ref('')
 
+// 3D模型面板组件
 const ModelPanel = {
   setup() {
     const containerRef = ref<HTMLElement | null>(null)
@@ -121,16 +120,45 @@ const ModelPanel = {
     let renderer: THREE.WebGLRenderer
     let model: THREE.Object3D
     let animationId: number
+    
+    // 鼠标交互相关变量
+    let isDragging = false
+    let previousMousePosition = { x: 0, y: 0 }
 
     onMounted(() => {
       if (containerRef.value) {
+        // 强制设置容器尺寸
+        containerRef.value.style.width = '100%'
+        containerRef.value.style.height = '100%'
+        containerRef.value.style.minHeight = '400px'
+        containerRef.value.style.minWidth = '600px'
+        containerRef.value.style.position = 'relative'
+        
+        // 强制浏览器重新计算布局
+        containerRef.value.offsetHeight
+        
+        // 初始化 Three.js
         initThree()
+        
+        // 添加鼠标事件监听器
+        addMouseEventListeners()
       }
+      
+      window.addEventListener('resize', handleResize)
     })
 
     onUnmounted(() => {
       if (animationId) cancelAnimationFrame(animationId)
       if (renderer) renderer.dispose()
+      window.removeEventListener('resize', handleResize)
+      
+      // 移除鼠标事件监听器
+      if (containerRef.value) {
+        containerRef.value.removeEventListener('mousedown', onMouseDown)
+        containerRef.value.removeEventListener('mousemove', onMouseMove)
+        containerRef.value.removeEventListener('mouseup', onMouseUp)
+        containerRef.value.removeEventListener('wheel', onWheel)
+      }
     })
 
     const initThree = () => {
@@ -139,44 +167,48 @@ const ModelPanel = {
       const width = containerRef.value.clientWidth
       const height = containerRef.value.clientHeight
 
+      if (width === 0 || height === 0) return
+
+      // 创建场景
       scene = new THREE.Scene()
       scene.background = new THREE.Color(0x0a0a1a)
 
+      // 创建相机
       camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000)
       camera.position.set(0, 2, 5)
 
+      // 创建渲染器
       renderer = new THREE.WebGLRenderer({ antialias: true })
       renderer.setSize(width, height)
       renderer.setPixelRatio(window.devicePixelRatio)
       renderer.toneMapping = THREE.ACESFilmicToneMapping
       containerRef.value.appendChild(renderer.domElement)
 
-      const ambientLight = new THREE.AmbientLight(0x4040ff, 0.5)
+      // 添加光源（增强光照）
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5) // 环境光
       scene.add(ambientLight)
 
-      const pointLight1 = new THREE.PointLight(0x00ffff, 2, 20)
-      pointLight1.position.set(5, 5, 5)
-      scene.add(pointLight1)
+      // 添加环形光源（从不同斜上方位置照射）
+      const ringLightCount = 6 // 环形光源数量
+      const ringRadius = 5 // 环形半径
+      const ringHeight = 3 // 环形高度
+      
+      for (let i = 0; i < ringLightCount; i++) {
+        const angle = (i / ringLightCount) * Math.PI * 2
+        const x = Math.cos(angle) * ringRadius
+        const z = Math.sin(angle) * ringRadius
+        const y = ringHeight
+        
+        const pointLight = new THREE.PointLight(0xffffff, 2, 20)
+        pointLight.position.set(x, y, z)
+        scene.add(pointLight)
+      }
 
-      const pointLight2 = new THREE.PointLight(0xff00ff, 2, 20)
-      pointLight2.position.set(-5, 3, -5)
-      scene.add(pointLight2)
-
+      // 添加网格辅助线
       const gridHelper = new THREE.GridHelper(20, 40, 0x00ffff, 0x004444)
       scene.add(gridHelper)
 
-      const loader = new GLTFLoader()
-      loader.load(
-        '/models/tank.glb',
-        (gltf) => {
-          model = gltf.scene
-          model.scale.set(0.5, 0.5, 0.5)
-          scene.add(model)
-        },
-        undefined,
-        () => {}
-      )
-
+      // 添加 torus
       const torusGeo = new THREE.TorusGeometry(2, 0.05, 16, 100)
       const torusMat = new THREE.MeshBasicMaterial({ color: 0x00ffff })
       const torus = new THREE.Mesh(torusGeo, torusMat)
@@ -184,134 +216,462 @@ const ModelPanel = {
       torus.position.y = -1
       scene.add(torus)
 
+      // 加载模型
+      const loader = new GLTFLoader()
+      loader.load(
+        '/models/tank.glb',
+        (gltf) => {
+          model = gltf.scene
+          model.scale.set(1.5, 1.5, 1.5) // 增加模型缩放系数
+          model.position.set(0, 1, 0) // 增加位置偏移，整体往上挪
+          scene.add(model)
+        },
+        undefined,
+        (error) => {
+          console.error('模型加载失败:', error)
+        }
+      )
+
+      // 开始动画
       animate()
+    }
+
+    const handleResize = () => {
+      if (!containerRef.value || !renderer || !camera) return
+
+      const width = containerRef.value.clientWidth
+      const height = containerRef.value.clientHeight
+
+      if (width === 0 || height === 0) return
+
+      camera.aspect = width / height
+      camera.updateProjectionMatrix()
+      renderer.setSize(width, height)
+    }
+
+    // 鼠标事件处理函数
+    const onMouseDown = (event: MouseEvent) => {
+      isDragging = true
+      previousMousePosition = {
+        x: event.clientX,
+        y: event.clientY
+      }
+    }
+
+    const onMouseMove = (event: MouseEvent) => {
+      if (!isDragging || !model) return
+
+      const deltaMove = {
+        x: event.clientX - previousMousePosition.x,
+        y: event.clientY - previousMousePosition.y
+      }
+
+      // 旋转模型
+      model.rotation.y += deltaMove.x * 0.01
+      model.rotation.x += deltaMove.y * 0.01
+
+      // 限制x轴旋转范围，防止过度旋转
+      model.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, model.rotation.x))
+
+      previousMousePosition = {
+        x: event.clientX,
+        y: event.clientY
+      }
+    }
+
+    const onMouseUp = () => {
+      isDragging = false
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      if (!camera) return
+
+      // 缩放相机距离
+      const zoomSpeed = 0.1
+      camera.position.z += event.deltaY * zoomSpeed * 0.01
+      
+      // 限制相机距离范围
+      camera.position.z = Math.max(1, Math.min(10, camera.position.z))
+    }
+
+    const addMouseEventListeners = () => {
+      if (!containerRef.value) return
+
+      containerRef.value.addEventListener('mousedown', onMouseDown)
+      containerRef.value.addEventListener('mousemove', onMouseMove)
+      containerRef.value.addEventListener('mouseup', onMouseUp)
+      containerRef.value.addEventListener('wheel', onWheel, { passive: false })
     }
 
     const animate = () => {
       animationId = requestAnimationFrame(animate)
-      if (model) {
+      if (model && !isDragging) {
         model.rotation.y += 0.005
       }
       renderer.render(scene, camera)
     }
 
     return () => h('div', { class: 'panel-content model-panel' }, [
-      h('div', { ref: containerRef, class: 'model-container' })
+      h('div', { 
+        ref: containerRef, 
+        class: 'model-container'
+      })
     ])
   }
 }
 
 const DataPanel = {
   setup() {
-    const dataItems = ref([
-      { name: '温度传感器', value: 45.2, unit: '°C', min: 0, max: 100 },
-      { name: '压力传感器', value: 2.5, unit: 'MPa', min: 0, max: 5 },
-      { name: '流量计', value: 120.5, unit: 'L/min', min: 0, max: 200 },
-      { name: '液位传感器', value: 75.0, unit: '%', min: 0, max: 100 },
-      { name: '电机转速', value: 1450, unit: 'RPM', min: 0, max: 3000 },
-      { name: '功率', value: 45.8, unit: 'kW', min: 0, max: 100 }
-    ])
+    const loading = ref(false)
+    const chartRef = ref<HTMLElement | null>(null)
+    let chart: echarts.ECharts | null = null
+    let chartInterval: number | null = null
 
-    const formatValue = (val: number) => val.toFixed(1)
+    const variables = ref<string[]>([])
+    const selectedVariable = ref('')
+    const timeRange = ref('1h')
+    const chartData = ref<any[]>([])
+    
+    const STORAGE_KEY = 'digital_roaming_selected_variable'
+    const TIME_RANGE_KEY = 'digital_roaming_time_range'
+
+    const loadConfig = () => {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      if (saved) {
+        selectedVariable.value = saved
+      }
+      const savedTimeRange = localStorage.getItem(TIME_RANGE_KEY)
+      if (savedTimeRange) {
+        timeRange.value = savedTimeRange
+      }
+    }
+
+    const saveConfig = () => {
+      localStorage.setItem(STORAGE_KEY, selectedVariable.value)
+      localStorage.setItem(TIME_RANGE_KEY, timeRange.value)
+    }
+
+    const loadVariables = async () => {
+      try {
+        const response = await getMonitorVariables()
+        if (response.data.success && response.data.variables) {
+          variables.value = response.data.variables.map((v: [string, string]) => v[0])
+        }
+      } catch (error) {
+        console.error('获取变量列表失败:', error)
+      }
+    }
+
+    const loadChartData = async () => {
+      if (!selectedVariable.value) {
+        chartData.value = []
+        return
+      }
+
+      loading.value = true
+      try {
+        const response = await getChartData(selectedVariable.value, timeRange.value, 'mean')
+        if (response.data.success) {
+          chartData.value = response.data.data || []
+        }
+      } catch (error) {
+        console.error('获取图表数据失败:', error)
+      } finally {
+        loading.value = false
+        nextTick(() => {
+          if (chart && !chart.isDisposed()) {
+            updateChart()
+          }
+        })
+      }
+    }
+
+    const initChart = () => {
+      if (!chartRef.value) return
+      
+      const { clientWidth, clientHeight } = chartRef.value
+      if (clientWidth > 0 && clientHeight > 0) {
+        if (chart && !chart.isDisposed()) {
+          chart.dispose()
+        }
+        chart = echarts.init(chartRef.value)
+        updateChart()
+      } else {
+        if ((chartRef.value as any).__retryCount === undefined) {
+          (chartRef.value as any).__retryCount = 0
+        }
+        (chartRef.value as any).__retryCount++
+        if ((chartRef.value as any).__retryCount < 50) {
+          setTimeout(initChart, 100)
+        }
+      }
+    }
+
+    const updateChart = () => {
+      if (!chart) return
+      
+      const times = chartData.value.map(d => d.timestamp)
+      const values = chartData.value.map(d => d.value)
+
+      const option = {
+        tooltip: {
+          trigger: 'axis',
+          formatter: (params: any) => {
+            const data = params[0]
+            return `${data.axisValue}<br/>${data.marker} ${selectedVariable.value || '数值'}: <b>${data.value.toFixed(2)}</b>`
+          }
+        },
+        grid: {
+          left: '3%',
+          right: '4%',
+          bottom: '3%',
+          top: '15%',
+          containLabel: true
+        },
+        xAxis: {
+          type: 'category',
+          boundaryGap: false,
+          data: times,
+          axisLabel: {
+            formatter: (value: string) => {
+              const date = new Date(value)
+              return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
+            },
+            color: '#00ffff',
+            fontSize: 10
+          },
+          axisLine: {
+            lineStyle: {
+              color: '#00ffff'
+            }
+          }
+        },
+        yAxis: {
+          type: 'value',
+          scale: true,
+          axisLabel: {
+            color: '#00ffff'
+          },
+          axisLine: {
+            lineStyle: {
+              color: '#00ffff'
+            }
+          },
+          splitLine: {
+            lineStyle: {
+              color: 'rgba(0, 255, 255, 0.1)'
+            }
+          }
+        },
+        series: [
+          {
+            name: selectedVariable.value || '数值',
+            type: 'line',
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 6,
+            sampling: 'lttb',
+            itemStyle: {
+              color: '#00ffff'
+            },
+            areaStyle: {
+              color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                { offset: 0, color: 'rgba(0, 255, 255, 0.3)' },
+                { offset: 1, color: 'rgba(0, 255, 255, 0.05)' }
+              ])
+            },
+            data: values
+          }
+        ]
+      }
+
+      chart.setOption(option)
+    }
+
+    const handleResize = () => {
+      if (chart) {
+        chart.resize()
+      }
+    }
+
+    onMounted(async () => {
+      loadConfig()
+      await loadVariables()
+      if (!selectedVariable.value && variables.value.length > 0) {
+        selectedVariable.value = variables.value[0] || ''
+        saveConfig()
+      }
+      await loadChartData()
+      
+      chartInterval = setInterval(loadChartData, 5000)
+      
+      nextTick(() => {
+        initChart()
+      })
+      
+      window.addEventListener('resize', handleResize)
+    })
+
+    onUnmounted(() => {
+      if (chart) chart.dispose()
+      if (chartInterval) clearInterval(chartInterval)
+      window.removeEventListener('resize', handleResize)
+    })
 
     return () => h('div', { class: 'panel-content data-panel' }, [
-      h('h3', { class: 'panel-title' }, '实时数据监控'),
-      h('div', { class: 'data-grid' },
-        dataItems.value.map(item =>
-          h('div', { class: 'data-card', key: item.name }, [
-            h('div', { class: 'data-name' }, item.name),
-            h('div', { class: 'data-value' }, [
-              h('span', { class: 'value' }, formatValue(item.value)),
-              h('span', { class: 'unit' }, item.unit)
-            ]),
-            h('div', { class: 'data-bar' }, [
-              h('div', {
-                class: 'bar-fill',
-                style: { width: `${(item.value / item.max) * 100}%` }
-              })
-            ])
+      h('div', { class: 'panel-header' }, [
+        h('h3', { class: 'panel-title' }, 'PLC数据监控'),
+        h('div', { class: 'panel-controls' }, [
+          h('select', {
+            class: 'control-select',
+            value: selectedVariable.value,
+            onChange: (e: Event) => {
+              selectedVariable.value = (e.target as HTMLSelectElement).value
+              saveConfig()
+              loadChartData()
+            }
+          }, [
+            h('option', { value: '' }, '请选择变量'),
+            ...variables.value.map(varName =>
+              h('option', { value: varName }, varName)
+            )
+          ]),
+          h('select', {
+            class: 'control-select',
+            value: timeRange.value,
+            onChange: (e: Event) => {
+              timeRange.value = (e.target as HTMLSelectElement).value
+              saveConfig()
+              loadChartData()
+            }
+          }, [
+            h('option', { value: '30m' }, '最近30分钟'),
+            h('option', { value: '1h' }, '最近1小时'),
+            h('option', { value: '6h' }, '最近6小时'),
+            h('option', { value: '12h' }, '最近12小时'),
+            h('option', { value: '24h' }, '最近24小时'),
+            h('option', { value: '7d' }, '最近7天')
           ])
-        )
-      )
+        ])
+      ]),
+      h('div', { class: 'chart-wrapper' }, [
+        h('div', { class: 'chart-header' }, [
+          h('span', { class: 'chart-title' }, [
+            h('span', { class: 'title-icon' }, '📈'),
+            selectedVariable.value ? `${selectedVariable.value} - 历史趋势` : '请选择变量查看趋势'
+          ])
+        ]),
+        h('div', { 
+          class: 'chart-container',
+          ref: chartRef
+        }),
+        !selectedVariable.value ? h('div', { class: 'empty-chart' }, '请从上方选择要查看的变量') : null
+      ])
     ])
   }
 }
 
-const ProcessPanel = {
-  setup() {
-    const steps = ref([
-      { id: 1, name: '原料投入', status: 'completed', progress: 100 },
-      { id: 2, name: '混合搅拌', status: 'active', progress: 65 },
-      { id: 3, name: '加热反应', status: 'pending', progress: 0 },
-      { id: 4, name: '冷却分离', status: 'pending', progress: 0 },
-      { id: 5, name: '成品输出', status: 'pending', progress: 0 }
-    ])
 
-    return () => h('div', { class: 'panel-content process-panel' }, [
-      h('h3', { class: 'panel-title' }, '工艺流程监控'),
-      h('div', { class: 'process-flow' },
-        steps.value.map((step, idx) =>
-          h('div', { class: `process-step ${step.status}`, key: step.id }, [
-            h('div', { class: 'step-indicator' }, [
-              h('div', { class: 'step-dot' }),
-              idx < steps.value.length - 1 ? h('div', { class: 'step-line' }) : null
-            ]),
-            h('div', { class: 'step-content' }, [
-              h('div', { class: 'step-name' }, step.name),
-              h('div', { class: 'step-progress' }, `${step.progress}%`)
-            ])
-          ])
-        )
-      )
-    ])
-  }
-}
 
 const StatusPanel = {
   setup() {
     const systemStatus = ref({
-      cpu: 35,
-      memory: 62,
-      network: 128.5,
-      uptime: '72:34:15'
+      cpu: 0,
+      memory: 0,
+      network: 0,
+      uptime: '00:00:00'
+    })
+    const plcConnected = ref(false)
+    const templateEnabled = ref(false)
+    let refreshInterval: number | null = null
+
+    const fetchStatus = async () => {
+      try {
+        const statusRes = await getStatus()
+        plcConnected.value = statusRes.data.plc_connected
+        templateEnabled.value = statusRes.data.template_matching
+
+        // 从后端获取真实系统状态数据
+        try {
+          const metricsRes = await getSystemMetrics()
+          systemStatus.value = metricsRes.data
+        } catch (metricsError) {
+          console.error('获取系统性能指标失败:', metricsError)
+          // 失败时使用默认值
+          systemStatus.value = {
+            cpu: 0,
+            memory: 0,
+            network: 0,
+            uptime: '00:00:00'
+          }
+        }
+      } catch (error) {
+        console.error('获取系统状态失败:', error)
+      }
+    }
+
+    onMounted(() => {
+      fetchStatus()
+      refreshInterval = window.setInterval(fetchStatus, 3000)
+    })
+
+    onUnmounted(() => {
+      if (refreshInterval) clearInterval(refreshInterval)
     })
 
     return () => h('div', { class: 'panel-content status-panel' }, [
       h('h3', { class: 'panel-title' }, '系统状态'),
-      h('div', { class: 'status-grid' }, [
-        h('div', { class: 'status-card' }, [
-          h('div', { class: 'status-icon cpu' }),
-          h('div', { class: 'status-info' }, [
-            h('span', { class: 'label' }, 'CPU使用率'),
-            h('span', { class: 'value' }, `${systemStatus.value.cpu}%`)
+      h('div', { class: 'status-overview' }, [
+        h('div', { class: 'status-card cpu-card' }, [
+          h('div', { class: 'status-header' }, [
+            h('div', { class: 'status-icon cpu' }),
+            h('span', { class: 'status-label' }, 'CPU使用率')
           ]),
-          h('div', { class: 'progress-bar' }, [
-            h('div', { class: 'progress-fill', style: { width: `${systemStatus.value.cpu}%` } })
-          ])
-        ]),
-        h('div', { class: 'status-card' }, [
-          h('div', { class: 'status-icon memory' }),
-          h('div', { class: 'status-info' }, [
-            h('span', { class: 'label' }, '内存使用率'),
-            h('span', { class: 'value' }, `${systemStatus.value.memory}%`)
+          h('div', { class: 'status-value' }, `${systemStatus.value.cpu}%`),
+          h('div', { class: 'status-progress' }, [
+            h('div', { 
+              class: 'progress-fill', 
+              style: { 
+                width: `${systemStatus.value.cpu}%`,
+                background: `linear-gradient(90deg, #ff6600, #ffaa00)`
+              } 
+            })
           ]),
-          h('div', { class: 'progress-bar' }, [
-            h('div', { class: 'progress-fill', style: { width: `${systemStatus.value.memory}%` } })
-          ])
+          h('div', { class: 'status-glow' })
         ]),
-        h('div', { class: 'status-card' }, [
-          h('div', { class: 'status-icon network' }),
-          h('div', { class: 'status-info' }, [
-            h('span', { class: 'label' }, '网络带宽'),
-            h('span', { class: 'value' }, `${systemStatus.value.network} Mbps`)
-          ])
+        h('div', { class: 'status-card memory-card' }, [
+          h('div', { class: 'status-header' }, [
+            h('div', { class: 'status-icon memory' }),
+            h('span', { class: 'status-label' }, '内存使用率')
+          ]),
+          h('div', { class: 'status-value' }, `${systemStatus.value.memory}%`),
+          h('div', { class: 'status-progress' }, [
+            h('div', { 
+              class: 'progress-fill', 
+              style: { 
+                width: `${systemStatus.value.memory}%`,
+                background: `linear-gradient(90deg, #9900ff, #cc66ff)`
+              } 
+            })
+          ]),
+          h('div', { class: 'status-glow' })
         ]),
-        h('div', { class: 'status-card' }, [
-          h('div', { class: 'status-icon uptime' }),
-          h('div', { class: 'status-info' }, [
-            h('span', { class: 'label' }, '运行时间'),
-            h('span', { class: 'value' }, systemStatus.value.uptime)
-          ])
+        h('div', { class: 'status-card network-card' }, [
+          h('div', { class: 'status-header' }, [
+            h('div', { class: 'status-icon network' }),
+            h('span', { class: 'status-label' }, '网络带宽')
+          ]),
+          h('div', { class: 'status-value' }, `${systemStatus.value.network} Mbps`),
+          h('div', { class: 'status-glow' })
+        ]),
+        h('div', { class: 'status-card uptime-card' }, [
+          h('div', { class: 'status-header' }, [
+            h('div', { class: 'status-icon uptime' }),
+            h('span', { class: 'status-label' }, '运行时间')
+          ]),
+          h('div', { class: 'status-value' }, systemStatus.value.uptime),
+          h('div', { class: 'status-glow' })
         ])
       ])
     ])
@@ -321,25 +681,25 @@ const StatusPanel = {
 const MentorPanel = {
   setup() {
     return () => h('div', { class: 'panel-content mentor-panel' }, [
-      h('h3', { class: 'panel-title' }, '导师介绍'),
+      h('h3', { class: 'panel-title' }, '实验室导师'),
       h('div', { class: 'mentor-content' }, [
         h('div', { class: 'mentor-image-container' }, [
           h('div', { class: 'mentor-image' }),
           h('div', { class: 'image-glow' })
         ]),
         h('div', { class: 'mentor-info' }, [
-          h('h4', { class: 'mentor-name' }, '张教授'),
-          h('p', { class: 'mentor-title' }, '自动化控制专家'),
+          h('h4', { class: 'mentor-name' }, '张明教授'),
+          h('p', { class: 'mentor-title' }, 'PLC工业控制技术专家'),
           h('div', { class: 'mentor-description' }, [
-            h('p', null, '张教授拥有20年自动化控制领域经验，专注于PLC编程与工业自动化系统设计。'),
-            h('p', null, '曾主持多个大型工业自动化项目，发表学术论文30余篇，培养研究生50余人。'),
-            h('p', null, '现任PLC科创实验室主任，致力于推动工业4.0技术在实际生产中的应用。')
+            h('p', null, '从事工业自动化控制领域研究20余年，专注于PLC编程与智能控制系统设计。'),
+            h('p', null, '主持完成企业自动化改造项目30余项，发表SCI/EI论文20余篇，获授权专利10余项。'),
+            h('p', null, '现任PLC科创实验室负责人，培养硕博研究生30余名，多人获省级优秀论文奖。')
           ]),
           h('div', { class: 'mentor-skills' }, [
+            h('span', { class: 'skill-tag' }, 'TwinCAT3'),
             h('span', { class: 'skill-tag' }, 'PLC编程'),
-            h('span', { class: 'skill-tag' }, '工业自动化'),
-            h('span', { class: 'skill-tag' }, '控制系统设计'),
-            h('span', { class: 'skill-tag' }, '工业4.0')
+            h('span', { class: 'skill-tag' }, '运动控制'),
+            h('span', { class: 'skill-tag' }, '工业物联网')
           ])
         ])
       ])
@@ -350,7 +710,6 @@ const MentorPanel = {
 const carouselItems = [
   { title: '3D模型', component: ModelPanel },
   { title: '数据监控', component: DataPanel },
-  { title: '工艺流程', component: ProcessPanel },
   { title: '系统状态', component: StatusPanel },
   { title: '导师介绍', component: MentorPanel }
 ]
@@ -712,11 +1071,11 @@ onUnmounted(() => {
 .roaming-content {
   position: relative;
   z-index: 10;
-  height: calc(100vh - 200px);
+  height: calc(100vh - 120px);
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   padding: 0 40px;
 }
 
@@ -777,7 +1136,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   transition: all 0.3s ease;
 }
@@ -814,7 +1173,7 @@ onUnmounted(() => {
 
 .roaming-footer {
   position: absolute;
-  bottom: 0;
+  bottom: 15px;
   left: 0;
   right: 0;
   z-index: 10;
@@ -909,12 +1268,34 @@ onUnmounted(() => {
   padding: 30px;
 }
 
-.panel-title {
-  font-size: 20px;
+:deep(.panel-title) {
+  font-size: 24px;
   color: #00ffff;
-  margin: 0 0 30px 0;
-  letter-spacing: 3px;
-  text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+  margin: 0;
+  letter-spacing: 4px;
+  text-shadow: 0 0 15px rgba(0, 255, 255, 0.8);
+  font-family: 'Orbitron', 'Rajdhani', 'Microsoft YaHei', sans-serif;
+}
+
+:deep(.panel-header) {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+:deep(.panel-controls) {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+:deep(.panel-controls .control-select) {
+  min-width: 160px;
+  margin: 0;
 }
 
 .model-panel {
@@ -930,73 +1311,207 @@ onUnmounted(() => {
   overflow-y: auto;
 }
 
-.data-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+.data-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
-.data-card {
+:deep(.config-bar) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 16px 20px;
+  background: rgba(0, 20, 40, 0.6);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+:deep(.config-section) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+:deep(.config-label) {
+  font-size: 13px;
+  color: rgba(0, 255, 255, 0.8);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+
+
+:deep(.control-bar) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: rgba(0, 20, 40, 0.8);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+:deep(.control-item) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+:deep(.control-item label) {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+  letter-spacing: 1px;
+}
+
+:deep(.control-select) {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #00ffff;
+  background: rgba(0, 20, 40, 0.9);
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  min-width: 160px;
+  font-family: 'Orbitron', 'Rajdhani', 'Microsoft YaHei', sans-serif;
+}
+
+:deep(.control-select:hover) {
+  border-color: rgba(0, 255, 255, 0.6);
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+}
+
+:deep(.control-select option) {
+  background: rgba(0, 20, 40, 0.95);
+  color: #00ffff;
+  font-family: 'Orbitron', 'Rajdhani', 'Microsoft YaHei', sans-serif;
+}
+
+:deep(.chart-wrapper) {
+  background: rgba(0, 20, 40, 0.8);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+:deep(.chart-header) {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(0, 255, 255, 0.2);
+  background: rgba(0, 30, 60, 0.9);
+}
+
+:deep(.chart-title) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #00ffff;
+  letter-spacing: 1px;
+  font-family: 'Orbitron', 'Rajdhani', 'Microsoft YaHei', sans-serif;
+}
+
+:deep(.title-icon) {
+  font-size: 18px;
+}
+
+:deep(.chart-container) {
+  height: 350px;
+  width: 100%;
+  position: relative;
+}
+
+:deep(.empty-chart) {
+  height: 350px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 16px;
+  letter-spacing: 2px;
+  font-family: 'Orbitron', 'Rajdhani', 'Microsoft YaHei', sans-serif;
+  background: rgba(0, 20, 40, 0.6);
+}
+
+:deep(.chart-container canvas) {
+  background: rgba(0, 10, 20, 0.5) !important;
+}
+
+:deep(.data-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.chart-container {
+  width: 100%;
+  height: 300px;
   background: rgba(0, 20, 40, 0.8);
   border: 1px solid rgba(0, 255, 255, 0.2);
   border-radius: 8px;
   padding: 20px;
+}
+
+:deep(.data-card) {
+  background: rgba(0, 20, 40, 0.8);
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 16px;
   transition: all 0.3s ease;
 }
 
-.data-card:hover {
+:deep(.data-card:hover) {
   border-color: rgba(0, 255, 255, 0.5);
   box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
 }
 
-.data-name {
-  font-size: 12px;
+:deep(.no-data) {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
   color: rgba(255, 255, 255, 0.6);
-  margin-bottom: 10px;
-  letter-spacing: 1px;
+  font-size: 16px;
+  letter-spacing: 2px;
 }
 
-.data-value {
+:deep(.data-header) {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+:deep(.data-name) {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+  letter-spacing: 1px;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+:deep(.data-indicator) {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+:deep(.data-value) {
   display: flex;
   align-items: baseline;
-  gap: 5px;
 }
 
-.data-value .value {
+:deep(.data-value .value) {
   font-size: 28px;
   font-weight: 700;
   color: #00ffff;
   text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
 }
 
-.data-value .unit {
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.5);
-}
 
-.data-bar {
-  height: 4px;
-  background: rgba(0, 255, 255, 0.1);
-  border-radius: 2px;
-  margin-top: 15px;
-  overflow: hidden;
-}
-
-.bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #00ffff, #00ff88);
-  border-radius: 2px;
-  transition: width 1s ease;
-}
-
-.process-panel {
-  overflow-y: auto;
-}
-
-.process-flow {
-  display: flex;
-  flex-direction: column;
-}
 
 .mentor-panel {
   padding: 40px;
@@ -1006,36 +1521,42 @@ onUnmounted(() => {
   overflow-y: auto;
 }
 
-.mentor-content {
+:deep(.mentor-content) {
   display: flex;
   gap: 40px;
   align-items: center;
   width: 100%;
   max-width: 900px;
   animation: slideIn 1s ease-out;
+  position: relative;
+  z-index: 10;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
 }
 
-.mentor-image-container {
+:deep(.mentor-image-container) {
   position: relative;
   width: 200px;
   height: 200px;
   animation: pulse 2s ease-in-out infinite alternate;
 }
 
-.mentor-image {
+:deep(.mentor-image) {
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, #00ffff, #00ff88), url('/Illustration_Vedal.png');
+  background-image: url('/mentor.png');
   background-size: cover;
   background-position: center;
-  background-blend-mode: overlay;
   border-radius: 50%;
   box-shadow: 0 0 30px rgba(0, 255, 255, 0.5);
   position: relative;
   overflow: hidden;
+  display: block;
+  min-width: 200px;
+  min-height: 200px;
 }
 
-.mentor-image::before {
+:deep(.mentor-image::before) {
   content: '';
   position: absolute;
   top: 0;
@@ -1046,7 +1567,7 @@ onUnmounted(() => {
   border-radius: 50%;
 }
 
-.image-glow {
+:deep(.image-glow) {
   position: absolute;
   top: -10px;
   left: -10px;
@@ -1059,12 +1580,13 @@ onUnmounted(() => {
   opacity: 0.6;
 }
 
-.mentor-info {
+:deep(.mentor-info) {
   flex: 1;
   animation: fadeIn 1.5s ease-out;
+  min-width: 0;
 }
 
-.mentor-name {
+:deep(.mentor-name) {
   font-size: 24px;
   font-weight: 700;
   color: #00ffff;
@@ -1073,33 +1595,34 @@ onUnmounted(() => {
   letter-spacing: 2px;
 }
 
-.mentor-title {
+:deep(.mentor-title) {
   font-size: 16px;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(26, 162, 220, 0.9);
   text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
   margin: 0 0 20px 0;
   letter-spacing: 1px;
 }
 
-.mentor-description {
+:deep(.mentor-description) {
   margin: 0 0 20px 0;
   line-height: 1.6;
 }
 
-.mentor-description p {
-  color: rgba(255, 255, 255, 0.95);
+:deep(.mentor-description p) {
+  color: rgba(74, 218, 243, 0.95);
   text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
   margin: 0 0 10px 0;
   font-size: 14px;
+  z-index: 20;
 }
 
-.mentor-skills {
+:deep(.mentor-skills) {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-.skill-tag {
+:deep(.skill-tag) {
   background: rgba(0, 255, 255, 0.1);
   border: 1px solid rgba(0, 255, 255, 0.3);
   border-radius: 16px;
@@ -1111,7 +1634,7 @@ onUnmounted(() => {
   animation: slideInUp 0.5s ease-out forwards;
 }
 
-.skill-tag:hover {
+:deep(.skill-tag:hover) {
   background: rgba(0, 255, 255, 0.2);
   box-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
   transform: translateY(-2px);
@@ -1158,145 +1681,178 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .mentor-content {
+  :deep(.mentor-content) {
     flex-direction: column;
     text-align: center;
   }
   
-  .mentor-image-container {
+  :deep(.mentor-image-container) {
     width: 150px;
     height: 150px;
   }
 }
 
-.process-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 20px;
-}
 
-.step-indicator {
-  display: flex;
-  align-items: center;
-}
-
-.step-dot {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  background: rgba(0, 20, 40, 0.8);
-  transition: all 0.3s ease;
-}
-
-.process-step.completed .step-dot {
-  background: #00ff00;
-  border-color: #00ff00;
-  box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
-}
-
-.process-step.active .step-dot {
-  background: #00ffff;
-  border-color: #00ffff;
-  box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
-  animation: pulse 2s ease-in-out infinite;
-}
-
-.step-line {
-  width: 2px;
-  height: 40px;
-  background: rgba(255, 255, 255, 0.2);
-  margin-left: 9px;
-}
-
-.process-step.completed .step-line {
-  background: linear-gradient(to bottom, #00ff00, rgba(0, 255, 0, 0.3));
-}
-
-.step-content {
-  flex: 1;
-  padding-top: 2px;
-}
-
-.step-name {
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.8);
-  margin-bottom: 5px;
-}
-
-.process-step.active .step-name {
-  color: #00ffff;
-  text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
-}
-
-.step-progress {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
-}
 
 .status-panel {
   overflow-y: auto;
 }
 
-.status-grid {
+:deep(.status-overview) {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 20px;
+  margin-top: 10px;
 }
 
-.status-card {
-  display: flex;
-  align-items: center;
-  gap: 15px;
+:deep(.status-card) {
+  position: relative;
   background: rgba(0, 20, 40, 0.8);
   border: 1px solid rgba(0, 255, 255, 0.2);
-  border-radius: 8px;
-  padding: 20px;
-}
-
-.status-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, rgba(0, 255, 255, 0.2), rgba(0, 255, 255, 0.1));
-}
-
-.status-icon.cpu { background: linear-gradient(135deg, rgba(255, 100, 0, 0.3), rgba(255, 100, 0, 0.1)); }
-.status-icon.memory { background: linear-gradient(135deg, rgba(100, 0, 255, 0.3), rgba(100, 0, 255, 0.1)); }
-.status-icon.network { background: linear-gradient(135deg, rgba(0, 255, 100, 0.3), rgba(0, 255, 100, 0.1)); }
-.status-icon.uptime { background: linear-gradient(135deg, rgba(255, 255, 0, 0.3), rgba(255, 255, 0, 0.1)); }
-
-.status-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.status-info .label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.status-info .value {
-  font-size: 18px;
-  font-weight: 600;
-  color: #00ffff;
-}
-
-.progress-bar {
-  width: 100%;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-  margin-top: 8px;
+  border-radius: 12px;
+  padding: 24px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0, 255, 255, 0.1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 
-.progress-fill {
+:deep(.status-card:hover) {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 30px rgba(0, 255, 255, 0.2);
+  border-color: rgba(0, 255, 255, 0.4);
+}
+
+:deep(.status-header) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+:deep(.status-icon) {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+:deep(.status-icon::before) {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, #00ffff, #00ff88);
-  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.6s;
+}
+
+:deep(.status-card:hover .status-icon::before) {
+  left: 100%;
+}
+
+:deep(.status-icon.cpu) {
+  background: linear-gradient(135deg, rgba(255, 100, 0, 0.3), rgba(255, 100, 0, 0.1));
+  color: #ff6600;
+}
+
+:deep(.status-icon.memory) {
+  background: linear-gradient(135deg, rgba(100, 0, 255, 0.3), rgba(100, 0, 255, 0.1));
+  color: #9900ff;
+}
+
+:deep(.status-icon.network) {
+  background: linear-gradient(135deg, rgba(0, 255, 100, 0.3), rgba(0, 255, 100, 0.1));
+  color: #00ff88;
+}
+
+:deep(.status-icon.uptime) {
+  background: linear-gradient(135deg, rgba(255, 255, 0, 0.3), rgba(255, 255, 0, 0.1));
+  color: #ffff00;
+}
+
+:deep(.status-label) {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+  letter-spacing: 1px;
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.3);
+  font-family: 'Orbitron', 'Rajdhani', 'Microsoft YaHei', sans-serif;
+}
+
+:deep(.status-value) {
+  font-size: 32px;
+  font-weight: 700;
+  color: #00ffff;
+  text-shadow: 0 0 15px rgba(0, 255, 255, 0.7);
+  margin-bottom: 16px;
+  font-family: 'Orbitron', 'Rajdhani', 'Microsoft YaHei', sans-serif;
+  letter-spacing: 2px;
+}
+
+:deep(.status-progress) {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+:deep(.progress-fill) {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+:deep(.progress-fill::after) {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: progressFlow 2s infinite;
+}
+
+@keyframes progressFlow {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+:deep(.status-glow) {
+  position: absolute;
+  top: -50%;
+  right: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(0, 255, 255, 0.1) 0%, transparent 70%);
+  animation: glowPulse 3s ease-in-out infinite;
+}
+
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
+
+
+@media (max-width: 768px) {
+  :deep(.status-overview) {
+    grid-template-columns: 1fr;
+  }
+  
+  :deep(.status-value) {
+    font-size: 24px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1314,11 +1870,11 @@ onUnmounted(() => {
     height: 350px;
   }
 
-  .data-grid {
+  :deep(.data-grid) {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .status-grid {
+  :deep(.status-grid) {
     grid-template-columns: 1fr;
   }
 
@@ -1330,4 +1886,62 @@ onUnmounted(() => {
     font-size: 10px;
   }
 }
+
+.play-controls {
+  position: fixed;
+  bottom: 40px;
+  right: 30px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: rgba(0, 255, 255, 0.1);
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  border-radius: 24px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0, 255, 255, 0.2);
+  flex-shrink: 0;
+  z-index: 1000;
+}
+
+.play-controls:hover {
+  background: rgba(0, 255, 255, 0.15);
+  box-shadow: 0 6px 30px rgba(0, 255, 255, 0.3);
+  transform: translateY(-2px);
+}
+
+.play-controls .el-button {
+  background: linear-gradient(135deg, #00ffff, #00aaff) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 16px;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0, 255, 255, 0.4);
+  animation: thumbGlow 2s ease-in-out infinite alternate;
+}
+
+.play-controls .el-button:hover {
+  background: linear-gradient(135deg, #00aaff, #00ffff) !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 16px rgba(0, 255, 255, 0.8);
+}
+
+.play-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #00ffff;
+  text-shadow: 0 0 8px rgba(0, 255, 255, 0.5);
+  letter-spacing: 1px;
+  transition: all 0.3s ease;
+  margin: 0;
+}
+
+.play-controls:hover .play-label {
+  color: #ffffff;
+  text-shadow: 0 0 12px rgba(255, 255, 255, 0.8);
+}
+
 </style>
