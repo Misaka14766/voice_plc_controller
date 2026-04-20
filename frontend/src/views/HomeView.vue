@@ -3,8 +3,12 @@
     <el-card class="card-container">
       <template #header>
         <div class="card-header">
-          <h2>语音PLC控制</h2>
-          <div class="status-indicators">
+          <h2>{{ titleGreeting }}</h2>
+          <div class="header-right">
+            <div class="tts-toggle">
+              <span class="tts-label">语音播报</span>
+              <el-switch v-model="ttsEnabled" @change="handleTtsChange" />
+            </div>
             <el-tooltip content="PLC连接状态">
               <el-tag :type="plcStatus.connected ? 'success' : 'danger'" class="status-tag">
                 {{ plcStatus.connected ? 'PLC已连接' : 'PLC未连接' }}
@@ -22,11 +26,16 @@
             :key="index"
             :class="['message', message.role === 'user' ? 'user-message' : 'assistant-message']"
           >
-            <div class="message-avatar">
-              <el-avatar :size="40">
-                {{ message.role === 'user' ? '我' : 'AI' }}
-              </el-avatar>
-            </div>
+            <el-avatar
+              :size="40"
+              :class="message.role === 'user' ? 'user-avatar' : 'ai-avatar'"
+              :src="message.role === 'user' ? userAvatar : undefined"
+              @click="message.role === 'user' && showAvatarDialog('user')"
+              :style="message.role === 'user' ? { cursor: 'pointer' } : {}"
+            >
+              <el-icon v-if="message.role === 'assistant'" :size="20"><ElementPlus /></el-icon>
+              <el-icon v-else-if="!userAvatar" :size="20"><User /></el-icon>
+            </el-avatar>
             <div class="message-content">
               <div class="message-text">{{ message.content }}</div>
               <div v-if="message.template" class="message-tag">
@@ -35,9 +44,9 @@
             </div>
           </div>
           <div v-if="recording" class="message recording-message">
-            <div class="message-avatar">
-              <el-avatar :size="40" icon="Mic" />
-            </div>
+            <el-avatar :size="40" class="recording-avatar">
+              <el-icon :size="20"><Mic /></el-icon>
+            </el-avatar>
             <div class="message-content">
               <div class="recording-indicator">
                 <el-icon class="recording-icon"><Mic /></el-icon>
@@ -59,6 +68,8 @@
             placeholder="输入指令或按麦克风按钮说话"
             @keyup.enter="sendText"
             class="text-input"
+            type="textarea"
+            :autosize="{ minRows: 1, maxRows: 3 }"
           >
             <template #append>
               <el-button
@@ -161,12 +172,40 @@
         </el-descriptions>
       </div>
     </el-card>
+
+    <!-- 头像预览对话框 -->
+    <el-dialog v-model="avatarDialogVisible" title="编辑头像" width="400px" center>
+      <div class="avatar-preview-container">
+        <el-avatar :size="120" class="preview-avatar" :src="tempAvatar">
+          <el-icon v-if="!tempAvatar" :size="40"><User /></el-icon>
+        </el-avatar>
+      </div>
+      <div class="avatar-upload-section">
+        <el-upload
+          class="avatar-uploader"
+          :show-file-list="false"
+          :before-upload="beforeAvatarUpload"
+          :http-request="handleAvatarUpload"
+          accept="image/*"
+        >
+          <el-button type="primary" size="default">
+            <el-icon><Upload /></el-icon> 选择图片
+          </el-button>
+        </el-upload>
+        <p class="upload-hint">支持 JPG、PNG、GIF 格式，建议图片尺寸 200x200</p>
+      </div>
+      <template #footer>
+        <el-button @click="cancelAvatarChange">取消</el-button>
+        <el-button type="danger" @click="resetAvatar">恢复默认</el-button>
+        <el-button type="primary" @click="confirmAvatarChange">确认</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, onUnmounted } from 'vue'
-import { Mic, Plus, Edit, Check, Close } from '@element-plus/icons-vue'
+import { ref, onMounted, nextTick, onUnmounted, computed } from 'vue'
+import { Mic, Plus, Edit, Check, Close, User, ElementPlus, Upload } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { sendChat, synthesizeTTS, healthCheck, getHistory, clearHistory } from '../api'
 import { loadQuickCommands, saveQuickCommands } from '../config/quickCommands'
@@ -175,6 +214,13 @@ const inputText = ref('')
 const chatHistory = ref<any[]>([])
 const chatHistoryRef = ref<HTMLElement>()
 const recording = ref(false)
+const ttsEnabled = ref(true)
+const greetingShown = ref(false)
+const userAvatar = ref<string>('')
+const tempAvatar = ref<string>('')
+const avatarDialogVisible = ref(false)
+const currentAvatarType = ref<'user' | ''>('')
+
 const plcStatus = ref({
   connected: false,
   asr_provider: '',
@@ -189,10 +235,103 @@ const editingValue = ref('')
 const addingCommand = ref(false)
 const newCommandValue = ref('')
 
-// WebSocket连接
 let ws: WebSocket | null = null
 let mediaRecorder: MediaRecorder | null = null
 let audioChunks: Blob[] = []
+
+const showAvatarDialog = (type: 'user') => {
+  currentAvatarType.value = type
+  tempAvatar.value = userAvatar.value
+  avatarDialogVisible.value = true
+}
+
+const beforeAvatarUpload = (file: File) => {
+  const isImage = file.type.startsWith('image/')
+  const isLt2M = file.size / 1024 / 1024 < 2
+  if (!isImage) {
+    ElMessage.error('只能上传图片文件！')
+    return false
+  }
+  if (!isLt2M) {
+    ElMessage.error('图片大小不能超过 2MB！')
+    return false
+  }
+  return true
+}
+
+const handleAvatarUpload = (param: { file: File }) => {
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    tempAvatar.value = e.target?.result as string
+  }
+  reader.readAsDataURL(param.file)
+}
+
+const confirmAvatarChange = () => {
+  userAvatar.value = tempAvatar.value
+  localStorage.setItem('voice_plc_user_avatar', tempAvatar.value)
+  avatarDialogVisible.value = false
+  ElMessage.success('头像更新成功')
+}
+
+const cancelAvatarChange = () => {
+  tempAvatar.value = userAvatar.value
+  avatarDialogVisible.value = false
+}
+
+const resetAvatar = () => {
+  userAvatar.value = ''
+  tempAvatar.value = ''
+  localStorage.removeItem('voice_plc_user_avatar')
+  avatarDialogVisible.value = false
+  ElMessage.success('头像已恢复默认')
+}
+
+const handleAvatarError = () => {
+  userAvatar.value = ''
+  localStorage.removeItem('voice_plc_user_avatar')
+}
+
+const greetingMessage = computed(() => {
+  const hour = new Date().getHours()
+  let greeting = ''
+  if (hour < 6) greeting = '凌晨好'
+  else if (hour < 9) greeting = '早上好'
+  else if (hour < 12) greeting = '上午好'
+  else if (hour < 14) greeting = '中午好'
+  else if (hour < 18) greeting = '下午好'
+  else if (hour < 22) greeting = '晚上好'
+  else greeting = '夜深了'
+  
+  return `${greeting}！我是您的工业语音助手。您可以通过语音或文字向我发送指令来控制PLC设备。\n\n我可以帮您：\n• 查询PLC变量状态\n• 控制电机、阀门等设备\n• 查看系统运行参数\n• 以及更多操作...\n\n请选择左侧的快捷指令或直接输入您的需求。`
+})
+
+const titleGreeting = computed(() => {
+  const hour = new Date().getHours()
+  if (hour < 6) return '凌晨好'
+  if (hour < 9) return '早上好'
+  if (hour < 12) return '上午好'
+  if (hour < 14) return '中午好'
+  if (hour < 18) return '下午好'
+  if (hour < 22) return '晚上好'
+  return '夜深了'
+})
+
+const handleTtsChange = (value: boolean) => {
+  localStorage.setItem('voice_plc_tts_enabled', String(value))
+}
+
+const showGreeting = () => {
+  if (chatHistory.value.length === 0 && !greetingShown.value) {
+    chatHistory.value.push({
+      role: 'assistant',
+      content: greetingMessage.value,
+      template: false
+    })
+    greetingShown.value = true
+    scrollToBottom()
+  }
+}
 
 // 滚动到聊天记录底部
 const scrollToBottom = () => {
@@ -446,6 +585,7 @@ const stopRecording = async () => {
 
 // 文本转语音并播放
 const synthesizeAndPlay = async (text: string) => {
+  if (!ttsEnabled.value) return
   try {
     const response = await synthesizeTTS(text)
     if (response.data && response.data.audio) {
@@ -489,10 +629,19 @@ const loadHistory = async () => {
 
 // 组件挂载时初始化
 onMounted(() => {
+  const savedTts = localStorage.getItem('voice_plc_tts_enabled')
+  if (savedTts !== null) {
+    ttsEnabled.value = savedTts === 'true'
+  }
+  const savedAvatar = localStorage.getItem('voice_plc_user_avatar')
+  if (savedAvatar) {
+    userAvatar.value = savedAvatar
+  }
   getSystemStatus()
-  loadHistory()
+  loadHistory().then(() => {
+    showGreeting()
+  })
   loadQuickCommandsFromStorage()
-  // 每10秒更新一次系统状态
   setInterval(getSystemStatus, 10000)
 })
 
@@ -521,6 +670,28 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.tts-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f5f7fa;
+  padding: 6px 12px;
+  border-radius: 20px;
+}
+
+.tts-label {
+  font-size: 13px;
+  color: #606266;
 }
 
 .card-header h2 {
@@ -568,12 +739,66 @@ onUnmounted(() => {
 }
 
 .message-avatar {
-  margin: 0 10px;
+  margin: 0 12px;
+}
+
+.user-message .message-avatar {
+  margin-left: 12px;
+  margin-right: 0;
+}
+
+.user-avatar {
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.user-avatar:hover {
+  transform: scale(1.1);
+}
+
+.ai-avatar {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.recording-avatar {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.avatar-preview-container {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0;
+}
+
+.preview-avatar {
+  border: 3px solid #e4e7ed;
+}
+
+.avatar-upload-section {
+  text-align: center;
+  padding: 10px 0;
+}
+
+.avatar-uploader {
+  margin-bottom: 10px;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #909399;
+  margin: 8px 0 0 0;
 }
 
 .message-content {
   flex: 1;
-  max-width: 70%;
+  max-width: 75%;
 }
 
 .user-message .message-content {
