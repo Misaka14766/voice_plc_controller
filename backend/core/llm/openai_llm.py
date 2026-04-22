@@ -67,81 +67,32 @@ def plc_list_variables() -> str:
     except Exception as e:
         return f"获取变量列表失败：{e}"
 
-@tool
-def analyze_water_level(hours: int = 1) -> str:
-    """分析水位数据，包括当前值、变化趋势、异常检测等。hours为分析的历史时间范围（小时），默认1小时"""
-    if _db_manager is None:
-        return "数据库未连接，无法分析水位数据"
-    try:
-        from backend.core.db.queries import DataQuerier
-        DataQuerier.init_instance(_db_manager)
-        
-        water_level_var = None
-        for name, info in settings.mappings.items():
-            if '水位' in name or '液位' in name or '液面' in name:
-                water_level_var = info['variable']
-                break
-        
-        if not water_level_var:
-            water_level_var = 'MAIN.IN'
-        
-        data = DataQuerier.get_aggregated(
-            variable_name=water_level_var,
-            hours=hours,
-            window_seconds=max(60, int(hours * 60 * 60 / 100)),
-            aggregation='mean'
-        )
-        
-        if not data or len(data) == 0:
-            return f"在过去的{hours}小时内未找到水位数据"
-        
-        values = [d.get('value', 0) for d in data if d.get('value') is not None]
-        if not values:
-            return f"在过去的{hours}小时内水位数据无效"
-        
-        current = values[-1] if values else 0
-        min_val = min(values)
-        max_val = max(values)
-        avg_val = sum(values) / len(values)
-        
-        trend = "稳定"
-        if len(values) >= 2:
-            recent = values[-3:] if len(values) >= 3 else values[-2:]
-            if all(recent[i] < recent[i+1] for i in range(len(recent)-1)):
-                trend = "上升"
-            elif all(recent[i] > recent[i+1] for i in range(len(recent)-1)):
-                trend = "下降"
-        
-        warnings = []
-        for name, info in settings.mappings.items():
-            if '水位' in name or '液位' in name or '液面' in name:
-                if 'min' in info:
-                    if current <= info['min']:
-                        warnings.append(f"水位低于最低阈值{info['min']}")
-                if 'max' in info:
-                    if current >= info['max']:
-                        warnings.append(f"水位高于最高阈值{info['max']}")
-        
-        result = f"水位分析报告（过去{hours}小时）：\n"
-        result += f"- 当前值：{current:.2f}\n"
-        result += f"- 平均值：{avg_val:.2f}\n"
-        result += f"- 最小值：{min_val:.2f}\n"
-        result += f"- 最大值：{max_val:.2f}\n"
-        result += f"- 趋势：{trend}\n"
-        if warnings:
-            result += f"- ⚠️ 警告：{'；'.join(warnings)}\n"
-        
-        return result
-    except Exception as e:
-        return f"水位分析失败：{e}"
+
 
 @tool
-def query_historical_data(variable: str, hours: int = 1, aggregation: str = "mean") -> str:
-    """查询历史数据，用于分析变量的历史趋势。variable为变量名，hours为查询时间范围（小时），aggregation为聚合方式(mean/max/min/sum)"""
+def query_historical_data(
+    variable: str, 
+    hours: int = 1, 
+    aggregation: str = "mean",
+    start_time: str = None, 
+    end_time: str = None,
+    data_points: int = 100
+) -> str:
+    """查询历史数据，用于分析变量的历史趋势。
+    
+    Args:
+        variable: 变量名（物理名称或PLC变量路径）
+        hours: 查询时间范围（小时），当未指定start_time时使用
+        aggregation: 聚合方式(mean/max/min/sum/first/last)
+        start_time: 开始时间（ISO格式字符串，如2024-01-01T00:00:00）
+        end_time: 结束时间（ISO格式字符串，默认为当前时间）
+        data_points: 期望的数据点数量，用于自动计算时间窗口
+    """
     if _db_manager is None:
         return "数据库未连接"
     try:
         from backend.core.db.queries import DataQuerier
+        from datetime import datetime, timedelta
         DataQuerier.init_instance(_db_manager)
         
         var_path = variable
@@ -150,31 +101,75 @@ def query_historical_data(variable: str, hours: int = 1, aggregation: str = "mea
                 var_path = info['variable']
                 break
         
+        # 处理时间参数
+        if end_time:
+            end_time_obj = datetime.fromisoformat(end_time)
+        else:
+            end_time_obj = datetime.now()
+        
+        if start_time:
+            start_time_obj = datetime.fromisoformat(start_time)
+            hours = (end_time_obj - start_time_obj).total_seconds() / 3600
+        else:
+            start_time_obj = end_time_obj - timedelta(hours=hours)
+        
+        # 计算窗口大小以获得期望的数据点数量
+        total_seconds = (end_time_obj - start_time_obj).total_seconds()
+        window_seconds = max(1, int(total_seconds / data_points))
+        
+        # 获取聚合数据
         data = DataQuerier.get_aggregated(
             variable_name=var_path,
             hours=hours,
-            window_seconds=max(60, int(hours * 60 * 60 / 100)),
-            aggregation=aggregation
+            window_seconds=window_seconds,
+            aggregation=aggregation,
+            end_time=end_time_obj
         )
         
         if not data or len(data) == 0:
-            return f"在过去的{hours}小时内未找到变量{variable}的数据"
+            return f"未找到变量{variable}的历史数据"
         
         values = [d.get('value', 0) for d in data if d.get('value') is not None]
         if not values:
-            return f"变量{variable}在过去的{hours}小时内数据无效"
+            return f"变量{variable}的历史数据无效"
         
+        # 计算统计信息
         current = values[-1] if values else 0
         min_val = min(values)
         max_val = max(values)
         avg_val = sum(values) / len(values)
         
-        return (f"变量 {variable} 历史数据（过去{hours}小时，{aggregation}聚合）：\n"
-                f"- 当前值：{current:.2f}\n"
-                f"- 平均值：{avg_val:.2f}\n"
-                f"- 最小值：{min_val:.2f}\n"
-                f"- 最大值：{max_val:.2f}\n"
-                f"- 数据点数：{len(values)}")
+        # 计算趋势
+        trend = "稳定"
+        if len(values) >= 2:
+            recent = values[-5:] if len(values) >= 5 else values[-2:]
+            if all(recent[i] < recent[i+1] for i in range(len(recent)-1)):
+                trend = "上升"
+            elif all(recent[i] > recent[i+1] for i in range(len(recent)-1)):
+                trend = "下降"
+        
+        # 构建返回结果
+        result = f"变量 {variable} 历史数据分析：\n"
+        result += f"- 时间范围：{start_time_obj.strftime('%Y-%m-%d %H:%M:%S')} 至 {end_time_obj.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        result += f"- 聚合方式：{aggregation}\n"
+        result += f"- 当前值：{current:.2f}\n"
+        result += f"- 平均值：{avg_val:.2f}\n"
+        result += f"- 最小值：{min_val:.2f}\n"
+        result += f"- 最大值：{max_val:.2f}\n"
+        result += f"- 趋势：{trend}\n"
+        result += f"- 数据点数：{len(values)}\n"
+        
+        # 当数据点较少时，返回具体数据点
+        if len(data) <= 100:
+            result += "\n详细数据点：\n"
+            for i, point in enumerate(data):
+                timestamp = point.get('timestamp', '')
+                value = point.get('value', 0)
+                result += f"  [{i+1}] {timestamp}: {value:.2f}\n"
+        else:
+            result += f"\n（数据点较多，仅显示统计信息）"
+        
+        return result
     except Exception as e:
         return f"查询历史数据失败：{e}"
 
@@ -188,13 +183,6 @@ def get_knowledge_base(topic: str = "") -> str:
     - 报警、安全：与系统报警和安全机制相关
     - 数据采集、故障排除、维护：与系统维护和故障处理相关
     - 历史数据、查询：与历史数据查询相关
-
-    当用户询问以下问题时，应调用此工具：
-    - "如何设置/操作XXX"
-    - "XXX不工作/出错了"
-    - "怎么查看/分析XXX"
-    - "XXX故障怎么解决"
-    - 任何关于系统使用、故障排除的问题
     """
     try:
         kb_path = Path(__file__).parent.parent.parent / "knowledge_base.yaml"
@@ -245,7 +233,7 @@ class OpenAICompatibleLLM(BaseLLM):
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
         )
-        self.tools = [plc_read, plc_write, plc_list_variables, analyze_water_level, query_historical_data, get_knowledge_base]
+        self.tools = [plc_read, plc_write, plc_list_variables, query_historical_data, get_knowledge_base]
         self.system_prompt = self._build_system_prompt()
         self._agent = None
 
@@ -258,14 +246,8 @@ class OpenAICompatibleLLM(BaseLLM):
             "- 任何涉及修改 PLC 变量值的操作，你必须调用 `plc_write` 工具执行写入。\n"
             "- 严禁凭空编造或猜测变量值，必须通过工具获取真实数据。\n"
             "- 若用户询问当前有哪些可用变量，请调用 `plc_list_variables` 获取列表。\n"
-            "- 若用户询问水位分析、趋势、异常等情况，请调用 `analyze_water_level` 工具。\n"
             "- 若用户询问历史数据、历史趋势等，请调用 `query_historical_data` 工具。\n"
             "- 若用户询问系统操作、故障排除、维护等问题，请调用 `get_knowledge_base` 工具。\n"
-            "  常见场景：\n"
-            "  * 用户说'如何设置水位'、'怎么操作XXX'时调用\n"
-            "  * 用户说'XXX不工作了'、'出错了'、'故障'时调用\n"
-            "  * 用户询问'怎么查看历史'、'分析趋势'时调用\n"
-            "  * 用户询问任何关于系统使用的问题时优先调用\n"
         )
         mappings = settings.mappings
         if mappings:

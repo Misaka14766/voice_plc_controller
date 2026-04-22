@@ -28,7 +28,7 @@
           >
             <el-avatar
               :size="40"
-              :class="message.role === 'user' ? 'user-avatar' : 'ai-avatar'"
+              :class="['message-avatar', message.role === 'user' ? 'user-avatar' : 'ai-avatar']"
               :src="message.role === 'user' ? userAvatar : undefined"
               @click="message.role === 'user' && showAvatarDialog('user')"
               :style="message.role === 'user' ? { cursor: 'pointer' } : {}"
@@ -303,7 +303,7 @@ const greetingMessage = computed(() => {
   else if (hour < 22) greeting = '晚上好'
   else greeting = '夜深了'
   
-  return `${greeting}！我是您的工业语音助手。您可以通过语音或文字向我发送指令来控制PLC设备。\n\n我可以帮您：\n• 查询PLC变量状态\n• 控制电机、阀门等设备\n• 查看系统运行参数\n• 以及更多操作...\n\n请选择左侧的快捷指令或直接输入您的需求。`
+  return `${greeting}！我是您的工业语音助手。您可以通过语音或文字向我发送指令来控制PLC设备。\n\n我可以帮您：\n• 查询PLC变量状态\n• 控制电机、阀门等设备\n• 查看系统运行参数\n• 以及更多操作...\n\n请选择下方的快捷指令或直接输入您的需求。`
 })
 
 const titleGreeting = computed(() => {
@@ -721,6 +721,7 @@ onUnmounted(() => {
   display: flex;
   margin-bottom: 15px;
   animation: fadeIn 0.3s ease-in-out;
+  gap: 2px;
 }
 
 @keyframes fadeIn {
@@ -739,12 +740,11 @@ onUnmounted(() => {
 }
 
 .message-avatar {
-  margin: 0 12px;
+  flex-shrink: 0;
 }
 
 .user-message .message-avatar {
-  margin-left: 12px;
-  margin-right: 0;
+  flex-shrink: 0;
 }
 
 .user-avatar {
@@ -797,7 +797,7 @@ onUnmounted(() => {
 }
 
 .message-content {
-  flex: 1;
+  flex: 0 1 auto;
   max-width: 75%;
 }
 
@@ -809,9 +809,15 @@ onUnmounted(() => {
   padding: 10px 15px;
   border-radius: 18px;
   line-height: 1.4;
+  word-wrap: break-word;
+  word-break: break-word;
+  white-space: normal;
+  display: inline-block;
+  text-align: left;
 }
 
 .user-message .message-text {
+  text-align: right;
   background-color: #409eff;
   color: white;
   border-bottom-right-radius: 4px;

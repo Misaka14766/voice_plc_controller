@@ -1,5 +1,4 @@
 import sqlite3
-import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import logging
@@ -16,7 +15,7 @@ class SQLiteDatabase(DatabaseInterface):
 
     def connect(self) -> bool:
         try:
-            self.connection = sqlite3.connect(self.db_path)
+            self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
             self.connection.row_factory = sqlite3.Row
             self._create_tables()
             self._connected = True

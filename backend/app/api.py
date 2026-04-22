@@ -184,11 +184,54 @@ async def websocket_asr(websocket: WebSocket):
             await websocket.close(code=1000, reason="ASR 服务未初始化")
             return
 
-        await asr.start_streaming(websocket)
+        # 初始化 ASR
+        asr.start()
+        
+        # 设置回调函数
+        async def callback(text: str, is_final: bool):
+            try:
+                await websocket.send_json({
+                    "type": "partial" if not is_final else "final",
+                    "text": text
+                })
+            except Exception as e:
+                logger.error(f"发送识别结果失败: {e}")
+        
+        asr.set_callback(callback)
+        
+        # 接收音频数据并处理
+        while True:
+            try:
+                # 尝试接收 JSON 数据（前端发送的格式）
+                data = await websocket.receive_json()
+                if data and data.get('type') == 'audio':
+                    # 解码 base64 音频数据
+                    import base64
+                    audio_bytes = base64.b64decode(data.get('data', ''))
+                    if audio_bytes:
+                        # 处理音频数据
+                        text = asr.feed_chunk(audio_bytes, is_final=data.get('is_final', False))
+            except Exception as e:
+                # 如果不是 JSON 数据，尝试接收字节数据
+                try:
+                    data = await websocket.receive_bytes()
+                    if data:
+                        # 处理音频数据
+                        text = asr.feed_chunk(data, is_final=False)
+                except Exception as e2:
+                    logger.error(f"接收音频数据失败: {e2}")
+                    break
+                
+        # 这里不会执行到，因为上面是无限循环
+        # 当 WebSocket 断开时会抛出 WebSocketDisconnect 异常
     except WebSocketDisconnect:
         logger.info("WebSocket 连接断开")
+        # 停止 ASR
+        asr.stop()
     except Exception as e:
         logger.error(f"WebSocket 错误: {str(e)}")
+        # 停止 ASR
+        asr.stop()
         await websocket.close(code=1000, reason=str(e))
 
 
