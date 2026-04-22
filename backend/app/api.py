@@ -70,16 +70,36 @@ async def get_monitor_variables():
 
 
 class MonitorVariablesRequest(BaseModel):
-    variables: List[str]
+    variables: List[Dict[str, str]]  # [{"name": "MAIN.WaterLevel", "type": "REAL"}, ...]
 
 
 @app.post("/api/plc/monitor-variables")
 async def update_monitor_variables(request: MonitorVariablesRequest):
     """更新监控变量列表"""
     try:
-        # 临时更新，实际应该持久化到配置文件
-        # 这里我们直接返回成功，因为当前实现是基于环境变量的
-        return {"success": True, "message": "监控变量已更新", "variables": request.variables}
+        # 从动态配置读取当前配置
+        current_config = settings.dynamic_config
+        
+        # 确保 monitor 部分存在
+        if 'monitor' not in current_config:
+            current_config['monitor'] = {}
+        
+        # 将变量列表转换为字符串格式存储
+        # 变量格式为 "MAIN.WaterLevel:REAL, MAIN.Temperature:REAL"
+        if request.variables:
+            variables_with_type = [f"{v['name']}:{v['type']}" for v in request.variables]
+            variables_str = ', '.join(variables_with_type)
+        else:
+            variables_str = ''
+        current_config['monitor']['variables'] = variables_str
+        
+        # 保存回配置文件
+        if settings.save_dynamic_config(current_config):
+            return {"success": True, "message": "监控变量已更新", "variables": request.variables}
+        else:
+            raise HTTPException(status_code=500, detail="保存配置文件失败")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"更新监控变量失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"更新监控变量失败: {str(e)}")

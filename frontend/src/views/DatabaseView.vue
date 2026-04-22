@@ -99,49 +99,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="历史数据" name="history-data">
-        <div class="history-data">
-          <el-card>
-            <template #header>
-              <div class="card-header">
-                <span>历史数据查询</span>
-                <el-select v-model="selectedHistoryVariable" placeholder="选择变量">
-                  <el-option
-                    v-for="variable in variables"
-                    :key="variable.name"
-                    :label="variable.comment || variable.name"
-                    :value="variable.name"
-                  />
-                </el-select>
-              </div>
-            </template>
-            <div class="history-controls">
-              <el-select v-model="historyHours" placeholder="时间范围" style="width: 120px">
-                <el-option label="1小时" :value="1" />
-                <el-option label="6小时" :value="6" />
-                <el-option label="12小时" :value="12" />
-                <el-option label="24小时" :value="24" />
-              </el-select>
-              <el-select v-model="historyAggregation" placeholder="聚合方式" style="width: 120px">
-                <el-option label="平均值" value="mean" />
-                <el-option label="最大值" value="max" />
-                <el-option label="最小值" value="min" />
-                <el-option label="总和" value="sum" />
-              </el-select>
-              <el-button type="primary" @click="loadHistoryData">
-                查询
-              </el-button>
-            </div>
-            <div v-if="historyData.length > 0" class="chart-container">
-              <div ref="chartRef" class="chart"></div>
-            </div>
-            <div v-else class="empty-history">
-              <el-icon :size="48"><Coin /></el-icon>
-              <p>暂无历史数据</p>
-            </div>
-          </el-card>
-        </div>
-      </el-tab-pane>
+
 
       <el-tab-pane label="系统管理" name="system-management">
         <div class="system-management">
@@ -222,9 +180,6 @@ import { getConfig, getMonitorVariables, getRealtimeData, getCollectorStatus, st
 
 const activeTab = ref('data-management')
 const searchKeyword = ref('')
-const selectedHistoryVariable = ref('')
-const historyHours = ref(1)
-const historyAggregation = ref('mean')
 const dialogHistoryHours = ref(1)
 
 const dbStatus = ref({
@@ -236,7 +191,6 @@ const dbStatus = ref({
 
 const variables = ref<any[]>([])
 const realtimeData = ref<any[]>([])
-const historyData = ref<any[]>([])
 const filteredVariables = ref<any[]>([])
 
 const systemForm = ref({
@@ -248,9 +202,7 @@ const detailDialogVisible = ref(false)
 const historyDialogVisible = ref(false)
 const currentVariable = ref<any>(null)
 
-const chartRef = ref<HTMLElement | null>(null)
 const historyChartRef = ref<HTMLElement | null>(null)
-let chart: echarts.ECharts | null = null
 let historyChart: echarts.ECharts | null = null
 
 const formatValue = (value: any) => {
@@ -296,16 +248,13 @@ const fetchVariables = async () => {
   try {
     const varsRes = await getMonitorVariables()
     if (varsRes.data.success) {
-      // 将 (name, type) 元组格式转换为对象数组
-      variables.value = varsRes.data.variables.map((v: [string, string]) => ({
-        name: v[0],
-        type: v[1]
-      }))
-      if (variables.value.length > 0 && !selectedHistoryVariable.value) {
-        selectedHistoryVariable.value = variables.value[0].name
-      }
-      await fetchRealtimeData()
-    }
+    // 将 (name, type) 元组格式转换为对象数组
+    variables.value = varsRes.data.variables.map((v: [string, string]) => ({
+      name: v[0],
+      type: v[1]
+    }))
+    await fetchRealtimeData()
+  }
   } catch (error) {
     console.error('获取变量列表失败:', error)
   }
@@ -342,77 +291,7 @@ const filterVariables = () => {
   }
 }
 
-const loadHistoryData = async () => {
-  if (!selectedHistoryVariable.value) {
-    ElMessage.warning('请选择变量')
-    return
-  }
-  
-  try {
-    const res = await getHistoryData(
-      selectedHistoryVariable.value,
-      historyHours.value,
-      historyAggregation.value
-    )
-    if (res.data.success) {
-      historyData.value = res.data.data
-      nextTick(() => {
-        renderChart()
-      })
-    }
-  } catch (error) {
-    console.error('获取历史数据失败:', error)
-    ElMessage.error('获取历史数据失败')
-  }
-}
 
-const renderChart = () => {
-  if (!chartRef.value) return
-  
-  if (chart) {
-    chart.dispose()
-  }
-  
-  chart = echarts.init(chartRef.value)
-  
-  const option = {
-    title: {
-      text: `${selectedHistoryVariable.value} 历史数据`,
-      left: 'center'
-    },
-    tooltip: {
-      trigger: 'axis'
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      containLabel: true
-    },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: historyData.value.map((item: any) => item.timestamp || '')
-    },
-    yAxis: {
-      type: 'value'
-    },
-    series: [
-      {
-        name: '数值',
-        type: 'line',
-        smooth: true,
-        data: historyData.value.map((item: any) => item.value || 0)
-      }
-    ]
-  }
-  
-  chart.setOption(option)
-  
-  window.addEventListener('resize', () => {
-    chart?.resize()
-  })
-}
 
 const toggleCollector = async (value: boolean) => {
   try {
@@ -577,12 +456,6 @@ watch(searchKeyword, () => {
   filterVariables()
 })
 
-watch(selectedHistoryVariable, () => {
-  if (selectedHistoryVariable.value) {
-    loadHistoryData()
-  }
-})
-
 onMounted(async () => {
   await refreshDBStatus()
   await fetchVariables()
@@ -662,38 +535,8 @@ onMounted(async () => {
   padding: 0 20px;
 }
 
-.history-data {
-  padding: 0 20px;
-}
-
 .system-management {
   padding: 0 20px;
-}
-
-.history-controls {
-  display: flex;
-  gap: 10px;
-  margin: 16px 0;
-  align-items: center;
-}
-
-.chart-container {
-  margin-top: 20px;
-}
-
-.chart {
-  width: 100%;
-  height: 400px;
-}
-
-.empty-history {
-  text-align: center;
-  padding: 60px 0;
-  color: #909399;
-}
-
-.empty-history p {
-  margin-top: 16px;
 }
 
 .variable-detail {

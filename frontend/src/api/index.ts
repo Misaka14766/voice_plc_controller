@@ -170,8 +170,13 @@ export const getRealtimeData = (variables: string[]) =>
 export const getMonitorVariables = () =>
   api.get<{ success: boolean; variables: Array<[string, string]> }>('/api/plc/monitor-variables')
 
-export const updateMonitorVariables = (variables: string[]) =>
-  api.post<{ success: boolean; message: string; variables: string[] }>('/api/plc/monitor-variables', {
+export interface MonitorVariable {
+  name: string
+  type: string
+}
+
+export const updateMonitorVariables = (variables: MonitorVariable[]) =>
+  api.post<{ success: boolean; message: string; variables: MonitorVariable[] }>('/api/plc/monitor-variables', {
     variables
   })
 

@@ -13,7 +13,328 @@
 - **PLC 触发**：支持通过 PLC 变量触发语音输入
 - **RESTful API**：提供 HTTP 接口，支持与其他系统集成
 - **现代化前端**：基于 Vue 3 + TypeScript + Element Plus 的响应式界面
-- **多页面设计**：包含语音控制、PLC监控、配置管理和关于页面
+- **多页面设计**：包含语音控制、PLC监控、3D模型、数据可视化、数据库管理、知识库和配置管理页面
+- **数字漫游模式**：支持 3D 模型展示和实验室介绍
+
+## 🎯 两种使用模式
+
+本项目支持两种使用模式，请根据您的需求选择合适的模式：
+
+### 模式一：无前端模式（推荐用于工业环境）
+
+直接运行后端程序，通过外置麦克风和 PLC 内的触发变量进行语音交互，或通过控制台输入指令。适合工业现场部署，无需浏览器界面。
+
+**特点**：
+- 占用资源少，适合嵌入式或远程部署
+- 响应速度快，无网络延迟
+- 支持物理按键或 PLC 变量触发语音输入
+- 控制台直接查看日志和状态
+
+### 模式二：有前端模式（推荐用于开发和调试）
+
+启动后端 API 服务和前端开发服务器，通过浏览器界面进行操作和控制。适合开发调试和需要可视化界面的场景。
+
+**特点**：
+- 现代化 Web 界面，操作友好
+- 支持 3D 模型展示
+- 实时数据可视化和历史记录
+- 远程访问和控制
+
+---
+
+## 🛠️ 环境准备
+
+### 硬件要求
+
+**模式一（无前端模式）**：
+- PLC 设备（Beckhoff TwinCAT3）
+- 运行 Windows/Linux 的工控机或服务器
+- 麦克风设备（支持 USB 或 3.5mm 接口）
+- 网络连接（用于连接 LLM 和 ASR 服务）
+
+**模式二（有前端模式）**：
+- 以上全部硬件
+- 开发或演示用的电脑/服务器
+- 支持现代浏览器的客户端设备（Chrome、Firefox、Edge 等）
+
+### 软件要求
+
+- Python 3.8+
+- Node.js 18+ 和 npm
+- PLC 运行时环境（TwinCAT3）
+
+---
+
+## 📦 快速开始
+
+### 模式一：无前端模式
+
+#### 1. 安装后端依赖
+
+```bash
+# 进入项目根目录
+cd voice_plc_controller
+
+# 进入 backend 目录
+cd backend
+
+# 创建并激活虚拟环境（推荐）
+python -m venv venv
+
+# Windows 激活虚拟环境
+venv\Scripts\activate
+
+# Linux/Mac 激活虚拟环境
+source venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+#### 2. 配置环境变量
+
+```bash
+# 复制环境变量模板
+copy .env.example .env   # Windows
+# cp .env.example .env   # Linux/Mac
+
+# 编辑 .env 文件，配置必要的参数
+notepad .env   # Windows
+nano .env      # Linux/Mac
+```
+
+**关键配置项**：
+
+```env
+# ASR 配置 - 语音识别
+ASR_PROVIDER=aliyun                    # ASR 提供商：aliyun 或 funasr
+ASR_SAMPLE_RATE=16000                  # 采样率
+ASR_TRIGGER_KEY=ctrl_r                 # 键盘触发快捷键
+
+# 阿里云 ASR 配置（如果使用阿里云）
+ALIYUN_ASR_APPKEY=your_appkey
+ALIYUN_AK_ID=your_access_key_id
+ALIYUN_AK_SECRET=your_access_key_secret
+ALIYUN_ASR_URL=wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1
+
+# TTS 配置 - 语音合成
+TTS_PROVIDER=edge                      # TTS 提供商：edge
+TTS_VOICE=zh-CN-XiaoxiaoNeural         # 语音角色
+TTS_VOLUME=0.8                         # 音量 0.0-1.0
+
+# LLM 配置 - 大语言模型
+LLM_PROVIDER=openai                    # LLM 提供商
+LLM_MODEL=gpt-4o-mini                   # 模型名称
+LLM_API_KEY=your_api_key               # API Key
+LLM_BASE_URL=https://api.openai.com/v1 # API 地址
+LLM_TEMPERATURE=0.7                    # 温度参数
+LLM_MAX_TOKENS=1024                    # 最大令牌数
+
+# PLC 配置
+PLC_ENABLED=true                       # 启用 PLC
+PLC_PROVIDER=pyads                     # PLC 提供商
+PLC_AMS_NET_ID=192.168.1.1.1.1         # PLC AMS Net ID
+PLC_AMS_PORT=851                       # PLC AMS 端口
+PLC_TRIGGER_VAR=MAIN.bVoiceTrigger     # 触发变量（PLC 变量触发录音）
+
+# 模板匹配（快速响应常用指令）
+USE_TEMPLATE_MATCHING=true
+
+# 交互开关
+VOICE_INPUT_ENABLED=true               # 语音输入
+VOICE_OUTPUT_ENABLED=true              # 语音输出
+
+# 日志
+LOG_LEVEL=INFO
+VERBOSE=true
+```
+
+#### 3. 运行程序
+
+```bash
+# 确保在 backend 目录下
+cd backend
+
+# 确保虚拟环境已激活
+# Windows
+venv\Scripts\activate
+# Linux/Mac
+source venv/bin/activate
+
+# 运行主程序
+python app/main.py
+```
+
+#### 4. 使用方式
+
+**启动后**，程序会显示以下信息：
+
+```
+按下 'ctrl_r' 键开始说话，松开结束。
+📝 控制台输出已启用
+💬 控制台已就绪，输入 '/' 查看命令，直接输入文字对话
+```
+
+**语音交互**：
+- 按住触发键（如 `ctrl_r`）说话，松开后自动识别
+- 或等待 PLC 触发变量变为 true 时自动开始录音
+
+**控制台命令**：
+- 直接输入文字按回车发送
+- 输入 `/help` 查看所有可用命令
+- 输入 `/voice status` 查看语音状态
+- 输入 `/plc status` 查看 PLC 连接状态
+- 输入 `/clear` 清空对话历史
+- 输入 `/exit` 退出程序
+
+---
+
+### 模式二：有前端模式
+
+#### 1. 安装后端依赖
+
+```bash
+# 进入项目根目录
+cd voice_plc_controller
+
+# 进入 backend 目录
+cd backend
+
+# 创建并激活虚拟环境（推荐）
+python -m venv venv
+
+# Windows 激活虚拟环境
+venv\Scripts\activate
+
+# Linux/Mac 激活虚拟环境
+source venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+#### 2. 配置后端环境变量
+
+```bash
+# 复制环境变量模板
+copy .env.example .env   # Windows
+# cp .env.example .env   # Linux/Mac
+
+# 编辑 .env 文件，配置 ASR、TTS、LLM 和 PLC 参数
+notepad .env   # Windows
+nano .env      # Linux/Mac
+```
+
+**关键配置项**（同上，请参考模式一的配置说明）
+
+#### 3. 安装前端依赖
+
+```bash
+# 新开一个终端，进入 frontend 目录
+cd voice_plc_controller/frontend
+
+# 安装依赖
+npm install
+```
+
+#### 4. 配置前端环境变量
+
+```bash
+# 复制环境变量模板
+copy .env.example .env   # Windows
+# cp .env.example .env   # Linux/Mac
+
+# 编辑 .env 文件
+notepad .env   # Windows
+nano .env      # Linux/Mac
+```
+
+```env
+# 后端API基础URL
+VITE_API_BASE_URL=http://localhost:8000
+
+# 前端应用配置
+VITE_APP_TITLE=语音PLC控制
+VITE_APP_VERSION=1.0.0
+```
+
+#### 5. 运行程序
+
+**启动后端 API 服务**：
+
+```bash
+# 终端 1：进入 backend 目录
+cd voice_plc_controller/backend
+
+# 激活虚拟环境
+venv\Scripts\activate   # Windows
+source venv/bin/activate # Linux/Mac
+
+# 运行 API 服务
+python app/api.py
+```
+
+看到以下输出表示启动成功：
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+**启动前端开发服务器**：
+
+```bash
+# 终端 2：进入 frontend 目录
+cd voice_plc_controller/frontend
+
+# 运行开发服务器
+npm run dev
+```
+
+看到以下输出表示启动成功：
+```
+VITE ready in xxx ms
+➜ Local: http://localhost:5173/
+```
+
+#### 6. 访问界面
+
+打开浏览器访问：`http://localhost:5173`
+
+**功能页面说明**：
+
+1. **语音控制页面**（首页）
+   - 文本输入框输入指令
+   - 麦克风按钮进行语音输入
+   - 查看系统状态和响应
+
+2. **PLC监控页面**
+   - 查看 PLC 变量列表
+   - 搜索和筛选变量
+   - 编辑变量值
+   - 隐藏/显示和锁定/解锁变量
+
+3. **3D模型页面**
+   - 查看 3D 模型
+   - 模型旋转、缩放和平移
+
+4. **数据可视化页面**
+   - 查看数据图表
+   - 分析数据趋势
+
+5. **数据库管理页面**
+   - 管理系统数据
+
+6. **知识库页面**
+   - 查看系统文档
+
+7. **配置管理页面**
+   - 查看和修改系统配置
+   - 配置修改后请点击保存按钮使配置生效
+
+8. **数字漫游模式**
+   - 点击页面顶部的「数字漫游」按钮进入
+   - 查看 3D 模型、数据监控、系统状态和实验室介绍
+
+---
 
 ## 🛠️ 技术栈
 
@@ -31,163 +352,9 @@
 - **UI 库**：Element Plus
 - **构建工具**：Vite
 - **路由**：Vue Router
-- **状态管理**：Pinia
 - **HTTP 客户端**：Axios
-
-## 📦 快速开始
-
-### 1. 安装后端依赖
-
-```bash
-# 进入 backend 目录
-cd backend
-
-# 安装依赖
-pip install -r requirements.txt
-```
-
-### 2. 安装前端依赖
-
-```bash
-# 进入 frontend 目录
-cd frontend
-
-# 安装依赖
-npm install
-```
-
-### 3. 配置环境变量
-
-#### 后端环境变量
-
-复制 `backend/.env.example` 文件为 `backend/.env` 并填写相关配置：
-
-```env
-# ASR 配置
-ASR_PROVIDER=aliyun
-ASR_SAMPLE_RATE=16000
-ASR_TRIGGER_KEY=ctrl_r
-
-# 阿里云 ASR 配置
-ALIYUN_ASR_APPKEY=your_appkey
-ALIYUN_AK_ID=your_access_key_id
-ALIYUN_AK_SECRET=your_access_key_secret
-ALIYUN_ASR_URL=wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1
-
-# TTS 配置
-TTS_PROVIDER=edge
-TTS_VOICE=zh-CN-XiaoxiaoNeural
-TTS_VOLUME=0.8
-TTS_PLAYER=pygame
-
-# LLM 配置
-LLM_PROVIDER=openai
-LLM_TEMPERATURE=0.7
-LLM_MAX_TOKENS=1024
-
-# ARK 配置（示例）
-#LLM_MODEL=doubao-1-5-pro-32k-250115
-#LLM_API_KEY=your_api_key
-#LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-
-# PLC 配置
-PLC_ENABLED=false
-PLC_PROVIDER=mock
-PLC_AMS_NET_ID=192.168.1.1.1.1
-PLC_AMS_PORT=851
-PLC_TRIGGER_VAR=MAIN.bVoiceTrigger
-
-# 模板匹配
-USE_TEMPLATE_MATCHING=true
-
-# 交互开关
-VOICE_INPUT_ENABLED=true
-VOICE_OUTPUT_ENABLED=true
-
-# 日志
-LOG_LEVEL=INFO
-VERBOSE=true
-
-# 监控变量（可选）
-# MONITOR_VARIABLES=MAIN.Temperature:REAL,MAIN.Pressure:REAL,MAIN.Motor1:BOOL
-# MONITOR_INTERVAL_MS=200
-```
-
-#### 前端环境变量
-
-复制 `frontend/.env.example` 文件为 `frontend/.env` 并填写相关配置：
-
-```env
-# 后端API基础URL
-VITE_API_BASE_URL=http://localhost:8000
-
-# 前端应用配置
-VITE_APP_TITLE=语音PLC控制
-VITE_APP_VERSION=1.0.0
-```
-
-### 4. 运行程序
-
-#### 后端 API 服务
-
-```bash
-# 进入 backend 目录
-cd backend
-
-# 运行 API 服务
-python app/api.py
-```
-
-#### 前端开发服务器
-
-```bash
-# 进入 frontend 目录
-cd frontend
-
-# 运行开发服务器
-npm run dev
-```
-
-## 🎯 使用方法
-
-### 前端界面使用
-
-1. **语音控制页面**：
-   - 通过文本输入框输入指令
-   - 点击麦克风按钮进行语音输入
-   - 查看系统状态和响应
-
-2. **PLC监控页面**：
-   - 查看 PLC 变量列表
-   - 搜索和筛选变量
-   - 编辑变量值
-   - 实时刷新变量状态
-
-3. **配置管理页面**：
-   - 查看系统配置
-   - 查看连接状态
-   - 查看系统信息
-
-4. **关于页面**：
-   - 查看项目信息
-   - 了解核心功能
-   - 查看技术栈
-
-### API 接口
-
-运行 API 服务后，可以通过以下接口与系统交互：
-
-- `POST /api/chat` - 发送文本指令
-- `POST /api/plc/read` - 读取 PLC 变量
-- `POST /api/plc/write` - 写入 PLC 变量
-- `GET /api/plc/variables` - 获取 PLC 变量列表
-- `POST /api/tts` - 文本转语音
-- `GET /api/health` - 健康检查
-- `GET /api/status` - 获取系统状态
-- `POST /api/clear` - 清空对话历史
-- `GET /api/history` - 获取对话历史
-- `GET /api/config` - 获取系统配置
-- `WebSocket /ws/asr` - 语音识别WebSocket接口
+- **3D 渲染**：Three.js
+- **数据可视化**：ECharts
 
 ## 📁 目录结构
 
@@ -233,23 +400,32 @@ voice_plc_controller/
 │   └── requirements.txt  # 依赖包
 ├── frontend/             # 前端应用
 │   ├── public/           # 公共静态资源
-│   │   └── favicon.ico   # 网站图标
+│   │   ├── hdri/         # HDR 环境贴图
+│   │   ├── models/       # 3D 模型文件
+│   │   ├── favicon.ico   # 网站图标
+│   │   └── lab.png       # 实验室图片
 │   ├── src/              # 源代码目录
 │   │   ├── api/          # API 调用封装
 │   │   │   ├── index.ts  # API 接口定义
 │   │   │   └── websocket.ts  # WebSocket 通信
 │   │   ├── assets/       # 静态资源
 │   │   │   ├── base.css  # 基础样式
-│   │   │   ├── logo.svg  # 项目 logo
+│   │   │   ├── logo.jpg  # 项目 logo
 │   │   │   └── main.css  # 全局样式
-│   │   ├── components/   # 组件
-│   │   │   └── PlcPanel.vue  # PLC 控制面板
+│   │   ├── config/       # 配置文件
+│   │   │   ├── modelMappings.ts  # 模型映射
+│   │   │   └── quickCommands.ts  # 快速命令
 │   │   ├── router/       # 路由配置
 │   │   │   └── index.ts  # 路由定义
 │   │   ├── views/        # 页面视图
 │   │   │   ├── AboutView.vue  # 关于页面
 │   │   │   ├── ConfigView.vue  # 配置管理页面
+│   │   │   ├── DataView.vue  # 数据可视化页面
+│   │   │   ├── DatabaseView.vue  # 数据库管理页面
+│   │   │   ├── DigitalRoamingView.vue  # 数字漫游页面
 │   │   │   ├── HomeView.vue  # 语音控制页面
+│   │   │   ├── KnowledgeView.vue  # 知识库页面
+│   │   │   ├── ModelView.vue  # 3D 模型页面
 │   │   │   └── PlcMonitorView.vue  # PLC 监控页面
 │   │   ├── App.vue       # 应用根组件
 │   │   └── main.ts       # 应用入口
@@ -349,8 +525,15 @@ ALIYUN_ASR_URL=wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1
 - 验证 TTS 语音配置是否正确
 
 ### API 服务问题
-- 检查端口是否被占用
+- 检查端口是否被占用（默认 8000）
 - 确保依赖包已正确安装
+- 查看后端日志输出
+
+### 前端开发问题
+- 运行 `npm install` 确保依赖安装完整
+- 检查 `vite.config.ts` 配置是否正确
+- 确保后端 API 服务正在运行
+- 检查浏览器控制台错误信息
 
 ## 🤝 贡献指南
 
@@ -369,4 +552,4 @@ ALIYUN_ASR_URL=wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1
 
 ---
 
-**注意**：本项目前端功能尚未完成。
+**注意**：由于测试难以全面覆盖，可能存在潜在的 bug，欢迎通过 GitHub Issues 反馈。

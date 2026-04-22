@@ -172,22 +172,28 @@
             </template>
           </el-table-column>
           <el-table-column prop="comment" label="注释" min-width="200" />
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="250" fixed="right">
             <template #default="scope">
               <div class="variable-actions">
                 <el-button 
-                  :type="scope.row.visible ? 'info' : 'warning'" 
+                  :type="scope.row.visible ? 'default' : 'info' " 
                   size="small" 
                   @click="toggleVariableVisibility(scope.row)"
+                  :class="{'white-button': scope.row.visible, 'gray-button': !scope.row.visible}"
                 >
-                  {{ scope.row.visible ? '隐藏' : '显示' }}
+                  <el-icon v-if="scope.row.visible"><View /></el-icon>
+                  <el-icon v-else><Hide /></el-icon>
+                  {{ scope.row.visible ? ' 隐藏' : ' 显示' }}
                 </el-button>
                 <el-button 
-                  :type="scope.row.locked ? 'warning' : 'default'" 
+                  :type="scope.row.locked ? 'info' : 'default' " 
                   size="small" 
                   @click="toggleVariableLock(scope.row)"
+                  :class="{'white-button': !scope.row.locked, 'gray-button': scope.row.locked}"
                 >
-                  {{ scope.row.locked ? '解锁' : '锁定' }}
+                  <el-icon v-if="scope.row.locked"><Lock /></el-icon>
+                  <el-icon v-else><Unlock /></el-icon>
+                  {{ scope.row.locked ? ' 解锁' : ' 锁定' }}
                 </el-button>
                 <el-tooltip :content="scope.row.monitored ? '点击移除监控' : '点击加入监控'" placement="top">
                   <el-button 
@@ -282,7 +288,7 @@ const typeFilter = ref('')
 const realtimeUpdate = ref(true)
 const mainModuleOnly = ref(false)
 const isMonitoring = ref(true)
-const monitorVariables = ref<string[]>([])
+const monitorVariables = ref<{name: string, type: string}[]>([])
 
 // 批量编辑
 const batchEditDialogVisible = ref(false)
@@ -355,7 +361,10 @@ const fetchMonitorVariables = async () => {
   try {
     const response = await getMonitorVariables()
     if (response.data.success) {
-      monitorVariables.value = response.data.variables.map((v: [string, string]) => v[0])
+      monitorVariables.value = response.data.variables.map((v: [string, string]) => ({
+        name: v[0],
+        type: v[1]
+      }))
     }
   } catch (error) {
     console.error('获取监控变量列表失败:', error)
@@ -374,25 +383,25 @@ const refreshVariables = async () => {
       plcConnected.value = true
       // 为每个变量添加额外属性
       const varsWithProperties = await Promise.all(
-        response.data.variables.map(async (v: any) => {
+        response.data.variables.map(async (varItem: any) => {
           try {
             // 尝试读取变量值
-            const readResponse = await readPLC(v.name, v.type)
+            const readResponse = await readPLC(varItem.name, varItem.type)
             return {
-              ...v,
+              ...varItem,
               value: readResponse.data.success ? readResponse.data.value : '读取失败',
               visible: true,
               locked: false,
-              monitored: monitorVariables.value.includes(v.name),
+              monitored: monitorVariables.value.some(mv => mv.name === varItem.name),
               lastUpdated: new Date().toISOString()
             }
           } catch (error) {
             return {
-              ...v,
+              ...varItem,
               value: '读取失败',
               visible: true,
               locked: false,
-              monitored: monitorVariables.value.includes(v.name),
+              monitored: monitorVariables.value.some(mv => mv.name === varItem.name),
               lastUpdated: new Date().toISOString()
             }
           }
@@ -493,11 +502,11 @@ const toggleVariableMonitoring = async (row: any) => {
     
     // 更新监控变量列表
     if (row.monitored) {
-      if (!monitorVariables.value.includes(row.name)) {
-        monitorVariables.value.push(row.name)
+      if (!monitorVariables.value.some(v => v.name === row.name)) {
+        monitorVariables.value.push({ name: row.name, type: row.type })
       }
     } else {
-      monitorVariables.value = monitorVariables.value.filter(v => v !== row.name)
+      monitorVariables.value = monitorVariables.value.filter(v => v.name !== row.name)
     }
     
     // 调用后端API更新监控变量
@@ -508,9 +517,9 @@ const toggleVariableMonitoring = async (row: any) => {
       // 回滚操作
       row.monitored = !row.monitored
       if (row.monitored) {
-        monitorVariables.value.push(row.name)
+        monitorVariables.value.push({ name: row.name, type: row.type })
       } else {
-        monitorVariables.value = monitorVariables.value.filter(v => v !== row.name)
+        monitorVariables.value = monitorVariables.value.filter(v => v.name !== row.name)
       }
       ElMessage.error('更新监控状态失败')
     }
@@ -518,9 +527,9 @@ const toggleVariableMonitoring = async (row: any) => {
     // 回滚操作
     row.monitored = !row.monitored
     if (row.monitored) {
-      monitorVariables.value.push(row.name)
+      monitorVariables.value.push({ name: row.name, type: row.type })
     } else {
-      monitorVariables.value = monitorVariables.value.filter(v => v !== row.name)
+      monitorVariables.value = monitorVariables.value.filter(v => v.name !== row.name)
     }
     ElMessage.error('更新监控状态失败')
   }
@@ -911,6 +920,18 @@ onUnmounted(() => {
 .variable-actions {
   display: flex;
   gap: 5px;
+}
+
+.white-button {
+  background-color: #ffffff !important;
+  border-color: #dcdfe6 !important;
+  color: #303133 !important;
+}
+
+.gray-button {
+  background-color: #f5f7fa !important;
+  border-color: #c0c4cc !important;
+  color: #909399 !important;
 }
 
 .batch-operations {

@@ -101,6 +101,7 @@ import { ref, computed, onMounted, onUnmounted, h, nextTick } from 'vue'
 import { VideoPlay, VideoPause, Monitor } from '@element-plus/icons-vue'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js'
 import * as echarts from 'echarts'
 import { getStatus, getChartData, getMonitorVariables, getSystemMetrics } from '@/api'
 
@@ -182,27 +183,39 @@ const ModelPanel = {
       renderer.setSize(width, height)
       renderer.setPixelRatio(window.devicePixelRatio)
       renderer.toneMapping = THREE.ACESFilmicToneMapping
+      renderer.toneMappingExposure = 1.0
+      renderer.outputEncoding = THREE.sRGBEncoding
       containerRef.value.appendChild(renderer.domElement)
 
+      // 加载HDRI环境贴图
+      const rgbeLoader = new RGBELoader()
+      rgbeLoader.load(
+        '/hdri/qwantani_moon_noon_puresky_1k.hdr',
+        (texture) => {
+          texture.mapping = THREE.EquirectangularReflectionMapping
+          scene.environment = texture
+          scene.background = texture
+        }
+      )
+
       // 添加光源（增强光照）
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5) // 环境光
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.8) // 增强环境光
       scene.add(ambientLight)
 
-      // 添加环形光源（从不同斜上方位置照射）
-      const ringLightCount = 6 // 环形光源数量
-      const ringRadius = 5 // 环形半径
-      const ringHeight = 3 // 环形高度
-      
-      for (let i = 0; i < ringLightCount; i++) {
-        const angle = (i / ringLightCount) * Math.PI * 2
-        const x = Math.cos(angle) * ringRadius
-        const z = Math.sin(angle) * ringRadius
-        const y = ringHeight
-        
-        const pointLight = new THREE.PointLight(0xffffff, 2, 20)
-        pointLight.position.set(x, y, z)
-        scene.add(pointLight)
-      }
+      // 添加半球光（模拟天空光）
+      const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2)
+      hemisphereLight.position.set(0, 20, 0)
+      scene.add(hemisphereLight)
+
+      // 添加方向光（主光源）
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5)
+      directionalLight.position.set(5, 10, 7.5)
+      scene.add(directionalLight)
+
+      // 添加点光源（辅助光源）
+      const pointLight = new THREE.PointLight(0xffffff, 1.0)
+      pointLight.position.set(0, 5, 0)
+      scene.add(pointLight)
 
       // 添加网格辅助线
       const gridHelper = new THREE.GridHelper(20, 40, 0x00ffff, 0x004444)
@@ -219,11 +232,11 @@ const ModelPanel = {
       // 加载模型
       const loader = new GLTFLoader()
       loader.load(
-        '/models/tank.glb',
+        '/models/tank_textured.glb',
         (gltf) => {
           model = gltf.scene
-          model.scale.set(1.5, 1.5, 1.5) // 增加模型缩放系数
-          model.position.set(0, 1, 0) // 增加位置偏移，整体往上挪
+          model.scale.set(2.0, 2.0, 2.0) // 增加模型缩放系数
+          model.position.set(0, 2.0, 0) // 增加位置偏移，整体往上挪
           scene.add(model)
         },
         undefined,
@@ -678,28 +691,30 @@ const StatusPanel = {
   }
 }
 
-const MentorPanel = {
+const LabPanel = {
   setup() {
-    return () => h('div', { class: 'panel-content mentor-panel' }, [
-      h('h3', { class: 'panel-title' }, '实验室导师'),
-      h('div', { class: 'mentor-content' }, [
-        h('div', { class: 'mentor-image-container' }, [
-          h('div', { class: 'mentor-image' }),
+    return () => h('div', { class: 'panel-content lab-panel' }, [
+      h('h3', { class: 'panel-title' }, '实验室介绍'),
+      h('div', { class: 'lab-content' }, [
+        h('div', { class: 'lab-image-container' }, [
+          h('div', { class: 'lab-image' }),
           h('div', { class: 'image-glow' })
         ]),
-        h('div', { class: 'mentor-info' }, [
-          h('h4', { class: 'mentor-name' }, '张明教授'),
-          h('p', { class: 'mentor-title' }, 'PLC工业控制技术专家'),
-          h('div', { class: 'mentor-description' }, [
-            h('p', null, '从事工业自动化控制领域研究20余年，专注于PLC编程与智能控制系统设计。'),
-            h('p', null, '主持完成企业自动化改造项目30余项，发表SCI/EI论文20余篇，获授权专利10余项。'),
-            h('p', null, '现任PLC科创实验室负责人，培养硕博研究生30余名，多人获省级优秀论文奖。')
+        h('div', { class: 'lab-info' }, [
+          h('h4', { class: 'lab-name' }, 'PLC科创实验室'),
+          h('p', { class: 'lab-title' }, '工业自动化控制研究中心'),
+          h('div', { class: 'lab-description' }, [
+            h('p', null, 'PLC科创实验室成立于2026年，是专注于工业自动化控制技术研究与应用的创新实验室。'),
+            h('p', null, '实验室拥有先进的工业控制设备和测试平台，包括Beckhoff TwinCAT3系统、西门子S7系列PLC、ABB机器人等。'),
+            h('p', null, '主要研究方向包括：PLC编程技术、工业物联网、智能控制系统、机器视觉、运动控制等。'),
+            h('p', null, '实验室与多家企业建立了产学研合作关系，致力于将科研成果转化为实际应用，为工业自动化领域培养高素质技术人才。')
           ]),
-          h('div', { class: 'mentor-skills' }, [
-            h('span', { class: 'skill-tag' }, 'TwinCAT3'),
-            h('span', { class: 'skill-tag' }, 'PLC编程'),
-            h('span', { class: 'skill-tag' }, '运动控制'),
-            h('span', { class: 'skill-tag' }, '工业物联网')
+          h('div', { class: 'lab-equipments' }, [
+            h('span', { class: 'equipment-tag' }, 'Beckhoff TwinCAT3'),
+            h('span', { class: 'equipment-tag' }, '西门子S7 PLC'),
+            h('span', { class: 'equipment-tag' }, 'ABB机器人'),
+            h('span', { class: 'equipment-tag' }, '机器视觉系统'),
+            h('span', { class: 'equipment-tag' }, '工业物联网平台')
           ])
         ])
       ])
@@ -711,7 +726,7 @@ const carouselItems = [
   { title: '3D模型', component: ModelPanel },
   { title: '数据监控', component: DataPanel },
   { title: '系统状态', component: StatusPanel },
-  { title: '导师介绍', component: MentorPanel }
+  { title: '实验室介绍', component: LabPanel }
 ]
 
 let autoPlayInterval: number
@@ -1513,7 +1528,7 @@ onUnmounted(() => {
 
 
 
-.mentor-panel {
+.lab-panel {
   padding: 40px;
   display: flex;
   flex-direction: column;
@@ -1521,9 +1536,9 @@ onUnmounted(() => {
   overflow-y: auto;
 }
 
-:deep(.mentor-content) {
+:deep(.lab-content) {
   display: flex;
-  gap: 40px;
+  gap: 80px;
   align-items: center;
   width: 100%;
   max-width: 900px;
@@ -1534,17 +1549,17 @@ onUnmounted(() => {
   justify-content: flex-start;
 }
 
-:deep(.mentor-image-container) {
+:deep(.lab-image-container) {
   position: relative;
   width: 200px;
   height: 200px;
   animation: pulse 2s ease-in-out infinite alternate;
 }
 
-:deep(.mentor-image) {
+:deep(.lab-image) {
   width: 100%;
   height: 100%;
-  background-image: url('/mentor.png');
+  background-image: url('/lab.jpg');
   background-size: cover;
   background-position: center;
   border-radius: 50%;
@@ -1556,7 +1571,7 @@ onUnmounted(() => {
   min-height: 200px;
 }
 
-:deep(.mentor-image::before) {
+:deep(.lab-image::before) {
   content: '';
   position: absolute;
   top: 0;
@@ -1580,13 +1595,13 @@ onUnmounted(() => {
   opacity: 0.6;
 }
 
-:deep(.mentor-info) {
+:deep(.lab-info) {
   flex: 1;
   animation: fadeIn 1.5s ease-out;
   min-width: 0;
 }
 
-:deep(.mentor-name) {
+:deep(.lab-name) {
   font-size: 24px;
   font-weight: 700;
   color: #00ffff;
@@ -1595,7 +1610,7 @@ onUnmounted(() => {
   letter-spacing: 2px;
 }
 
-:deep(.mentor-title) {
+:deep(.lab-title) {
   font-size: 16px;
   color: rgba(26, 162, 220, 0.9);
   text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
@@ -1603,26 +1618,26 @@ onUnmounted(() => {
   letter-spacing: 1px;
 }
 
-:deep(.mentor-description) {
+:deep(.lab-description) {
   margin: 0 0 20px 0;
   line-height: 1.6;
 }
 
-:deep(.mentor-description p) {
+:deep(.lab-description p) {
   color: rgba(74, 218, 243, 0.95);
   text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
   margin: 0 0 10px 0;
   font-size: 14px;
-  z-index: 20;
+  letter-spacing: 0.5px;
 }
 
-:deep(.mentor-skills) {
+:deep(.lab-equipments) {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-:deep(.skill-tag) {
+:deep(.equipment-tag) {
   background: rgba(0, 255, 255, 0.1);
   border: 1px solid rgba(0, 255, 255, 0.3);
   border-radius: 16px;
@@ -1634,7 +1649,7 @@ onUnmounted(() => {
   animation: slideInUp 0.5s ease-out forwards;
 }
 
-:deep(.skill-tag:hover) {
+:deep(.equipment-tag:hover) {
   background: rgba(0, 255, 255, 0.2);
   box-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
   transform: translateY(-2px);
