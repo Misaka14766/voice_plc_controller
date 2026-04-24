@@ -19,10 +19,11 @@
 ## 📹 演示视频
 
 ### 前端操作界面演示
-<video src="https://github.com/Misaka14766/voice_plc_controller/raw/main/videos/frontend_demo.mp4" controls width="600"></video>
+https://github.com/Misaka14766/voice_plc_controller/raw/main/videos/frontend_demo.mp4
 
 ### 数字漫游模式演示
-<video src="https://github.com/Misaka14766/voice_plc_controller/raw/main/videos/roaming_demo.mp4" controls width="600"></video>
+https://github.com/Misaka14766/voice_plc_controller/raw/main/videos/roaming_demo.mp4
+
 
 ## 🎯 两种使用模式
 
