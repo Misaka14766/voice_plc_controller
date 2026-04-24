@@ -16,6 +16,14 @@
 - **多页面设计**：包含语音控制、PLC监控、3D模型、数据可视化、数据库管理、知识库和配置管理页面
 - **数字漫游模式**：支持 3D 模型展示和实验室介绍
 
+## 📹 演示视频
+
+### 前端操作界面演示
+<video src="https://github.com/Misaka14766/voice_plc_controller/raw/main/videos/frontend_demo.mp4" controls width="600"></video>
+
+### 数字漫游模式演示
+<video src="https://github.com/Misaka14766/voice_plc_controller/raw/main/videos/roaming_demo.mp4" controls width="600"></video>
+
 ## 🎯 两种使用模式
 
 本项目支持两种使用模式，请根据您的需求选择合适的模式：
@@ -78,14 +86,11 @@ cd voice_plc_controller
 # 进入 backend 目录
 cd backend
 
-# 创建并激活虚拟环境（推荐）
-python -m venv venv
+# 创建并激活conda虚拟环境（推荐）
+conda create -n voice_plc python=3.8
 
-# Windows 激活虚拟环境
-venv\Scripts\activate
-
-# Linux/Mac 激活虚拟环境
-source venv/bin/activate
+# 激活虚拟环境
+conda activate voice_plc
 
 # 安装依赖
 pip install -r requirements.txt
@@ -155,11 +160,8 @@ VERBOSE=true
 # 确保在 backend 目录下
 cd backend
 
-# 确保虚拟环境已激活
-# Windows
-venv\Scripts\activate
-# Linux/Mac
-source venv/bin/activate
+# 确保conda虚拟环境已激活
+conda activate voice_plc
 
 # 运行主程序
 python app/main.py
@@ -200,14 +202,11 @@ cd voice_plc_controller
 # 进入 backend 目录
 cd backend
 
-# 创建并激活虚拟环境（推荐）
-python -m venv venv
+# 创建并激活conda虚拟环境（推荐）
+conda create -n voice_plc python=3.8
 
-# Windows 激活虚拟环境
-venv\Scripts\activate
-
-# Linux/Mac 激活虚拟环境
-source venv/bin/activate
+# 激活虚拟环境
+conda activate voice_plc
 
 # 安装依赖
 pip install -r requirements.txt
@@ -266,9 +265,8 @@ VITE_APP_VERSION=1.0.0
 # 终端 1：进入 backend 目录
 cd voice_plc_controller/backend
 
-# 激活虚拟环境
-venv\Scripts\activate   # Windows
-source venv/bin/activate # Linux/Mac
+# 激活conda虚拟环境
+conda activate voice_plc
 
 # 运行 API 服务
 python app/api.py
@@ -436,6 +434,7 @@ voice_plc_controller/
 │   ├── package-lock.json # 依赖版本锁定
 │   ├── tsconfig.json     # TypeScript 配置
 │   └── vite.config.ts    # Vite 配置
+├── videos/               # 演示视频
 ├── .gitignore            # Git 忽略配置
 ├── .gitattributes        # Git 属性配置
 ├── LICENSE               # 许可证文件
@@ -444,7 +443,7 @@ voice_plc_controller/
 
 ## ⚙️ 配置说明
 
-### 变量映射
+### 后端变量映射
 
 在 `backend/config/variable_mappings.yaml` 中配置物理名称到 PLC 变量的映射：
 
@@ -463,6 +462,29 @@ mappings:
     type: REAL
     description: 压力传感器值
 ```
+
+### 前端模型映射
+
+在 `frontend/src/config/modelMappings.ts` 中配置 3D 模型组件到 PLC 变量的映射：
+
+```typescript
+export interface ModelMapping {
+  variable: string
+  label: string
+}
+
+export const MODEL_COMPONENT_MAPPINGS: Record<string, ModelMapping> = {
+  Mesh149: { variable: 'MAIN.WaterLevel', label: '水箱1水位' },
+  Mesh153: { variable: 'MAIN.WaterLevel2', label: '水箱2水位' },
+  Mesh185: { variable: 'MAIN.Temperature', label: '加热器温度' }
+}
+```
+
+**说明**：
+- `Mesh149`、`Mesh153`、`Mesh185` 等是 3D 模型中的组件名称
+- `variable` 对应 PLC 中的变量名
+- `label` 是显示在界面上的标签文本
+- 配置后，前端会自动将 3D 模型组件与 PLC 变量关联，实现数据可视化
 
 ### 监控变量
 

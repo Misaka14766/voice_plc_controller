@@ -102,6 +102,28 @@ async def update_monitor_variables(request: MonitorVariablesRequest):
         
         # 保存回配置文件
         if settings.save_dynamic_config(current_config):
+            # 更新数据采集器
+            global data_collector
+            if data_collector:
+                # 停止当前数据采集器
+                data_collector.stop()
+                # 等待任务完全停止
+                import asyncio
+                await asyncio.sleep(0.5)
+                logger.info("数据采集器已停止，准备更新监控变量")
+                
+                # 清除现有变量
+                data_collector.variables = []
+                
+                # 添加新的监控变量
+                for var in request.variables:
+                    data_collector.add_variable(var['name'], var['type'])
+                
+                # 重新启动数据采集器
+                data_collector.start()
+                logger.info("数据采集器已更新并重新启动")
+                logger.info(f"新的监控变量: {[v.name for v in data_collector.variables]}")
+            
             return {"success": True, "message": "监控变量已更新", "variables": request.variables}
         else:
             raise HTTPException(status_code=500, detail="保存配置文件失败")
