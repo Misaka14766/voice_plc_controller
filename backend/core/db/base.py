@@ -61,3 +61,8 @@ class DatabaseInterface(ABC):
     def clear_all_data(self) -> bool:
         """清空所有数据"""
         pass
+    
+    @abstractmethod
+    def get_all_variables(self) -> List[str]:
+        """获取所有变量名"""
+        pass

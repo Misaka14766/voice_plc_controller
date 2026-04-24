@@ -222,6 +222,9 @@ export const clearVariableDataAPI = (variable: string) =>
 export const clearAllDataAPI = () =>
   api.post<{ success: boolean; message: string }>('/api/db/clear-all')
 
+export const getAllDBVariables = () =>
+  api.get<{ success: boolean; variables: string[] }>('/api/data/variables')
+
 export const getQuickCommands = () =>
   api.get<{ success: boolean; commands: string[] }>('/api/quick-commands')
 

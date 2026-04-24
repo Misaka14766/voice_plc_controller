@@ -301,3 +301,14 @@ class SQLiteDatabase(DatabaseInterface):
         except Exception as e:
             logger.error(f"清空所有数据失败: {e}")
             return False
+    
+    def get_all_variables(self) -> List[str]:
+        """获取所有变量名"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT DISTINCT variable_name FROM plc_data")
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+        except Exception as e:
+            logger.error(f"获取所有变量失败: {e}")
+            return []

@@ -57,6 +57,13 @@
                   <div class="dot"></div>
                 </div>
               </div>
+              <div v-if="realTimeSpeechText" class="real-time-speech-text">
+                <div class="speech-text-content">{{ realTimeSpeechText }}</div>
+                <div class="speech-text-indicator">
+                  <el-icon class="pulse-icon"><Mic /></el-icon>
+                  <span>识别中...</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -84,10 +91,7 @@
           <el-button
             :type="recording ? 'danger' : 'success'"
             circle
-            @mousedown="startRecording"
-            @mouseup="stopRecording"
-            @touchstart="startRecording"
-            @touchend="stopRecording"
+            @click="toggleRecording"
             class="voice-button"
           >
             <el-icon><Mic /></el-icon>
@@ -220,6 +224,7 @@ const userAvatar = ref<string>('')
 const tempAvatar = ref<string>('')
 const avatarDialogVisible = ref(false)
 const currentAvatarType = ref<'user' | ''>('')
+const realTimeSpeechText = ref('')
 
 const plcStatus = ref({
   connected: false,
@@ -236,8 +241,7 @@ const addingCommand = ref(false)
 const newCommandValue = ref('')
 
 let ws: WebSocket | null = null
-let mediaRecorder: MediaRecorder | null = null
-let audioChunks: Blob[] = []
+let currentAudio: HTMLAudioElement | null = null
 
 const showAvatarDialog = (type: 'user') => {
   currentAvatarType.value = type
@@ -319,6 +323,11 @@ const titleGreeting = computed(() => {
 
 const handleTtsChange = (value: boolean) => {
   localStorage.setItem('voice_plc_tts_enabled', String(value))
+  if (!value && currentAudio) {
+    currentAudio.pause()
+    currentAudio.currentTime = 0
+    currentAudio = null
+  }
 }
 
 const showGreeting = () => {
@@ -450,12 +459,22 @@ const loadQuickCommandsFromStorage = () => {
   quickCommands.value = loadQuickCommands()
 }
 
+// 在组件顶层或 script setup 中需要声明这些变量以保存音频实例
+let audioContext: AudioContext | null = null
+let audioWorkletNode: AudioWorkletNode | null = null
+let mediaStream: MediaStream | null = null
+// 扩展Window接口以支持webkitAudioContext
+interface Window {
+  webkitAudioContext?: typeof AudioContext
+}
+// 注：假设 ws 和 recording 已经在你的代码作用域内声明了
+
 // 开始录音
 const startRecording = async () => {
   if (recording.value) return
 
   try {
-    // 连接WebSocket
+    // --- 1. 连接WebSocket (保留你原有的完整逻辑) ---
     const wsUrl = import.meta.env.VITE_API_BASE_URL?.replace('http', 'ws') + '/ws/asr'
     ws = new WebSocket(wsUrl)
 
@@ -466,16 +485,20 @@ const startRecording = async () => {
     ws.onmessage = async (event) => {
       const data = JSON.parse(event.data)
       if (data.type === 'partial') {
-        // 收到部分识别结果，可以实时显示
+        // 更新实时识别文本
+        realTimeSpeechText.value = data.text
         console.log('实时识别:', data.text)
       } else if (data.type === 'final') {
-        // 收到最终识别结果
+        // 清空实时识别文本
+        realTimeSpeechText.value = ''
+        
         if (data.text) {
+          // 将最终识别结果添加到对话历史
           chatHistory.value.push({ role: 'user', content: data.text })
           scrollToBottom()
 
-          // 发送文本指令
           try {
+            // 调用对话接口
             const response = await sendChat(data.text)
             if (response.data) {
               chatHistory.value.push({
@@ -484,8 +507,6 @@ const startRecording = async () => {
                 template: response.data.template
               })
               scrollToBottom()
-
-              // 语音合成
               await synthesizeAndPlay(response.data.response)
             }
           } catch (error) {
@@ -497,7 +518,7 @@ const startRecording = async () => {
             scrollToBottom()
           }
         }
-        ws?.close()
+        // 不要自动关闭WebSocket连接，保持连接以便下次使用
       } else if (data.type === 'error') {
         console.error('WebSocket错误:', data.text)
         ElMessage.error(data.text)
@@ -507,11 +528,16 @@ const startRecording = async () => {
     ws.onerror = (error) => {
       console.error('WebSocket错误:', error)
       ElMessage.error('语音识别服务连接失败')
+      // 发生错误时重置录音状态，但不调用stopRecording避免循环错误
       recording.value = false
+      cleanupAudioResources()
     }
 
     ws.onclose = () => {
       console.log('WebSocket连接已关闭')
+      // 连接关闭时重置UI状态，但不调用stopRecording避免循环错误
+      recording.value = false
+      cleanupAudioResources()
     }
 
     // 等待WebSocket连接建立
@@ -527,70 +553,145 @@ const startRecording = async () => {
       }, 100)
     })
 
-    // 获取麦克风权限并开始录音
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    mediaRecorder = new MediaRecorder(stream)
+    // --- 2. 核心重构：使用 Audio Worklet 处理音频 ---
+    
+    // 获取麦克风权限
+    mediaStream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        channelCount: 1, // 单声道
+        echoCancellation: true,
+        noiseSuppression: true
+      }
+    })
+    
+    // 初始化 AudioContext
+    audioContext = new AudioContext({sampleRate: 16000})
+    console.log('AudioContext采样率:', audioContext.sampleRate)
+    
+    // 检查Audio Worklet支持
+    if (!audioContext.audioWorklet) {
+      throw new Error('浏览器不支持Audio Worklet，请使用现代浏览器如Chrome、Edge、Firefox等')
+    }
 
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0 && ws?.readyState === WebSocket.OPEN) {
-        // 实时发送音频数据
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          const audioData = e.target?.result as ArrayBuffer
-          const base64Data = btoa(String.fromCharCode(...new Uint8Array(audioData)))
-          
-          ws?.send(JSON.stringify({
-            type: 'audio',
-            data: base64Data,
-            is_final: false
-          }))
-        }
-        reader.readAsArrayBuffer(event.data)
+    // 添加Audio Worklet模块
+    await audioContext.audioWorklet.addModule('/audio-worklet-processor.js')
+    console.log('Audio Worklet模块加载成功')
+    
+    // 创建音频源节点
+    const source = audioContext.createMediaStreamSource(mediaStream)
+    
+    // 创建Audio Worklet节点
+    audioWorkletNode = new AudioWorkletNode(audioContext, 'audio-worklet-processor', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+      processorOptions: {
+        frameSize: 128 // 每帧处理128个样本
+      }
+    })
+
+    // 设置Audio Worklet消息处理器
+    audioWorkletNode.port.onmessage = (event) => {
+      const { type, data } = event.data
+      
+      if (type === 'audioData' && ws?.readyState === WebSocket.OPEN) {
+        // 通过WebSocket发送PCM数据
+        ws.send(data)
       }
     }
 
-    mediaRecorder.start(100) // 每100ms发送一次数据
+    // 连接音频处理图
+    source.connect(audioWorkletNode)
+    // 连接到destination以保持音频处理活跃
+    audioWorkletNode.connect(audioContext.destination)
+
+    // 通知Audio Worklet开始处理（只发送连接状态，不传递WebSocket对象）
+    audioWorkletNode.port.postMessage({
+      type: 'connect'
+    })
+
     recording.value = true
+    console.log('Audio Worklet录音已启动')
+
   } catch (error) {
     console.error('录音失败:', error)
-    ElMessage.error('录音权限被拒绝或设备不可用')
-    if (ws) {
-      ws.close()
-    }
+    const errorMessage = error instanceof Error ? error.message : '录音权限被拒绝或设备不可用'
+    ElMessage.error(errorMessage)
+    if (ws) ws.close()
+    recording.value = false
   }
+}
+
+// 清理音频资源（不发送结束标记）
+const cleanupAudioResources = async () => {
+  // 1. 通知Audio Worklet停止处理
+  if (audioWorkletNode) {
+    audioWorkletNode.port.postMessage({
+      type: 'disconnect'
+    })
+    audioWorkletNode.disconnect()
+    audioWorkletNode = null
+  }
+  
+  // 2. 关闭 AudioContext
+  if (audioContext && audioContext.state !== 'closed') {
+    await audioContext.close()
+    audioContext = null
+  }
+
+  // 3. 停止并释放麦克风硬件流
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(track => track.stop())
+    mediaStream = null
+  }
+
+  console.log('音频资源已清理')
 }
 
 // 停止录音
 const stopRecording = async () => {
-  if (!recording.value || !mediaRecorder) return
+  if (!recording.value) return
 
   recording.value = false
-  mediaRecorder.stop()
 
-  mediaRecorder.onstop = async () => {
-    // 发送最终音频数据标记
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'audio',
-        data: '',
-        is_final: true
-      }))
-    }
+  // 1. 发送结束标记给后端
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(new ArrayBuffer(0))
+  }
 
-    // 停止媒体流
-    const stream = mediaRecorder?.stream
-    stream?.getTracks().forEach(track => track.stop())
+  // 2. 清理音频资源
+  await cleanupAudioResources()
+
+  // 3. 清空实时识别文本
+  realTimeSpeechText.value = ''
+
+  console.log('Audio Worklet录音已停止')
+}
+
+// 单击切换录音状态 (保持不变)
+const toggleRecording = () => {
+  if (recording.value) {
+    stopRecording()
+  } else {
+    startRecording()
   }
 }
+
+
 
 // 文本转语音并播放
 const synthesizeAndPlay = async (text: string) => {
   if (!ttsEnabled.value) return
   try {
+    if (currentAudio) {
+      currentAudio.pause()
+      currentAudio.currentTime = 0
+      currentAudio = null
+    }
     const response = await synthesizeTTS(text)
     if (response.data && response.data.audio) {
-      const audio = new Audio(`data:audio/mp3;base64,${response.data.audio}`)
-      audio.play()
+      currentAudio = new Audio(`data:audio/mp3;base64,${response.data.audio}`)
+      currentAudio.play()
     }
   } catch (error) {
     console.error('语音合成失败:', error)
@@ -649,9 +750,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (ws) {
     ws.close()
-  }
-  if (mediaRecorder) {
-    mediaRecorder.stop()
   }
 })
 </script>
@@ -942,6 +1040,36 @@ onUnmounted(() => {
 
 .system-status {
   margin-top: 30px;
+}
+
+/* 实时语音识别文本样式 */
+.real-time-speech-text {
+  margin-top: 10px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+  border: 1px solid #bbdefb;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.1);
+}
+
+.speech-text-content {
+  font-size: 16px;
+  font-weight: 500;
+  color: #1565c0;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.speech-text-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #5c6bc0;
+}
+
+.pulse-icon {
+  animation: pulse 1.5s infinite;
 }
 
 /* 滚动条样式 */

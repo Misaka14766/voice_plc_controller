@@ -8,6 +8,6 @@ interaction:
   voice_output_enabled: true
 monitor:
   interval_ms: 1000
-  variables: MAIN.WaterLevel:REAL, MAIN.Temperature:REAL
+  variables: ''
 plc:
   trigger_var: MAIN.bVoiceTrigger

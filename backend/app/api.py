@@ -1,20 +1,27 @@
 import base64
 import logging
+import sys
+import traceback
 from pathlib import Path
 import yaml
+import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+import asyncio
 
-from ..config.settings import settings
-from ..core import get_llm, get_plc, get_asr, get_tts
-from ..core.llm.openai_llm import set_plc_instance, set_db_manager
-from ..core.template_matcher import TemplateMatcher
-from ..core.db import DatabaseFactory, DatabaseInterface
-from ..core.db.queries import DataQuerier
-from ..core.plc.collector import PLCCollector
+# Add root directory to sys.path
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+sys.path.append(ROOT_DIR)
+
+from backend.config.settings import settings
+from backend.core import get_llm, get_plc, get_asr, get_tts
+from backend.core.llm.openai_llm import set_plc_instance, set_db_manager
+from backend.core.template_matcher import TemplateMatcher
+from backend.core.db import DatabaseFactory, DatabaseInterface
+from backend.core.db.queries import DataQuerier
+from backend.core.plc.collector import PLCCollector
 
 logging.basicConfig(
     level=logging.INFO,
@@ -178,6 +185,7 @@ async def shutdown_event():
 async def websocket_asr(websocket: WebSocket):
     """WebSocket 实时语音识别"""
     await websocket.accept()
+    
     try:
         asr = get_asr()
         if not asr:
@@ -187,52 +195,88 @@ async def websocket_asr(websocket: WebSocket):
         # 初始化 ASR
         asr.start()
         
-        # 设置回调函数
-        async def callback(text: str, is_final: bool):
+        # 获取当前事件循环
+        loop = asyncio.get_event_loop()
+        
+        # 设置回调函数（同步函数，使用loop.call_soon_threadsafe处理跨线程操作）
+        def callback(text: str, is_final: bool):
             try:
-                await websocket.send_json({
-                    "type": "partial" if not is_final else "final",
-                    "text": text
-                })
+                # 使用call_soon_threadsafe确保从任何线程安全地调用
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.create_task(
+                        websocket.send_json({
+                            "type": "partial" if not is_final else "final",
+                            "text": text
+                        })
+                    )
+                )
             except Exception as e:
-                logger.error(f"发送识别结果失败: {e}")
+                logger.error(f"发送识别结果失败: {str(e)}")
+                logger.error("完整调用堆栈:")
+                traceback.print_exc()
+                sys.stderr.write(traceback.format_exc())
         
         asr.set_callback(callback)
         
-        # 接收音频数据并处理
+        # 直接处理前端发送的PCM数据（16位有符号整型，16kHz，单声道）
+        logger.info("开始处理PCM音频数据")
+        
+        # 接收音频数据并直接发送给ASR
         while True:
             try:
-                # 尝试接收 JSON 数据（前端发送的格式）
-                data = await websocket.receive_json()
-                if data and data.get('type') == 'audio':
-                    # 解码 base64 音频数据
-                    import base64
-                    audio_bytes = base64.b64decode(data.get('data', ''))
-                    if audio_bytes:
-                        # 处理音频数据
-                        text = asr.feed_chunk(audio_bytes, is_final=data.get('is_final', False))
-            except Exception as e:
-                # 如果不是 JSON 数据，尝试接收字节数据
-                try:
-                    data = await websocket.receive_bytes()
-                    if data:
-                        # 处理音频数据
-                        text = asr.feed_chunk(data, is_final=False)
-                except Exception as e2:
-                    logger.error(f"接收音频数据失败: {e2}")
-                    break
+                # 前端直接发送PCM数据（ArrayBuffer）
+                data = await websocket.receive_bytes()
+
+                logger.debug(f"ASR 收到PCM数据，大小: {len(data)} 字节")
                 
-        # 这里不会执行到，因为上面是无限循环
-        # 当 WebSocket 断开时会抛出 WebSocketDisconnect 异常
+                if data:
+                    # 检查是否是结束标记（空的字节数据）
+                    if len(data) == 0:
+                        # 处理结束标记
+                        logger.info("收到录音结束标记")
+                        
+                        # 发送最终数据
+                        asr.feed_chunk(b'', is_final=True)
+                        logger.info("ASR 处理完成")
+                        
+                        # 继续等待下一个数据块
+                        continue
+                    
+                    else:
+                        # 直接将PCM数据发送给ASR
+                        asr.feed_chunk(data, is_final=False)
+                            
+            except WebSocketDisconnect:
+                logger.info("WebSocket 连接断开（在接收数据时）")
+                break
+            except Exception as e:
+                logger.error(f"接收音频数据失败: {str(e)}")
+                logger.error("完整调用堆栈:")
+                traceback.print_exc()
+                sys.stderr.write(traceback.format_exc())
+                break
+                
     except WebSocketDisconnect:
         logger.info("WebSocket 连接断开")
         # 停止 ASR
-        asr.stop()
+        if asr:
+            asr.stop()
     except Exception as e:
-        logger.error(f"WebSocket 错误: {str(e)}")
+        # 输出完整的错误信息和调用堆栈
+        error_msg = f"WebSocket 错误: {str(e)}"
+        logger.error(error_msg)
+        logger.error("完整调用堆栈:")
+        traceback.print_exc()
+        sys.stderr.write(traceback.format_exc())
         # 停止 ASR
-        asr.stop()
+        if asr:
+            asr.stop()
         await websocket.close(code=1000, reason=str(e))
+    finally:
+        # 确保ASR被停止
+        if asr:
+            asr.stop()
+        logger.info("WebSocket处理结束")
 
 
 @app.post("/api/chat")
@@ -574,6 +618,22 @@ async def get_history_data(
     except Exception as e:
         logger.error(f"获取历史数据失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取历史数据失败: {str(e)}")
+
+
+@app.get("/api/data/variables")
+async def get_all_db_variables():
+    """获取所有数据库变量"""
+    try:
+        if not db_manager:
+            raise HTTPException(status_code=503, detail="数据库未启用")
+
+        variables = DataQuerier.get_all_variables()
+        return {"success": True, "variables": variables}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取数据库变量失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取数据库变量失败: {str(e)}")
 
 
 @app.get("/api/data/chart")

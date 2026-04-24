@@ -145,3 +145,10 @@ class DataQuerier:
             "data_points": len(data),
             "data": data
         }
+    
+    @classmethod
+    def get_all_variables(cls) -> List[str]:
+        """获取所有数据库变量名"""
+        if cls._instance and hasattr(cls._instance.db, 'get_all_variables'):
+            return cls._instance.db.get_all_variables()
+        return []

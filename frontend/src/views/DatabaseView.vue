@@ -176,7 +176,7 @@ import { ref, onMounted, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, Check, Close, Coin } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
-import { getConfig, getMonitorVariables, getRealtimeData, getCollectorStatus, startCollector, stopCollector, getHistoryData, clearVariableDataAPI, clearAllDataAPI } from '../api'
+import { getConfig, getAllDBVariables, getRealtimeData, getCollectorStatus, startCollector, stopCollector, getHistoryData, clearVariableDataAPI, clearAllDataAPI } from '../api'
 
 const activeTab = ref('data-management')
 const searchKeyword = ref('')
@@ -246,12 +246,12 @@ const refreshDBStatus = async () => {
 
 const fetchVariables = async () => {
   try {
-    const varsRes = await getMonitorVariables()
+    const varsRes = await getAllDBVariables()
     if (varsRes.data.success) {
-    // 将 (name, type) 元组格式转换为对象数组
-    variables.value = varsRes.data.variables.map((v: [string, string]) => ({
-      name: v[0],
-      type: v[1]
+    // 将变量名列表转换为对象数组
+    variables.value = varsRes.data.variables.map((name: string) => ({
+      name: name,
+      type: 'REAL' // 默认类型，实际类型可从数据库获取
     }))
     await fetchRealtimeData()
   }
