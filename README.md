@@ -487,13 +487,36 @@ export const MODEL_COMPONENT_MAPPINGS: Record<string, ModelMapping> = {
 - `label` 是显示在界面上的标签文本
 - 配置后，前端会自动将 3D 模型组件与 PLC 变量关联，实现数据可视化
 
-### 监控变量
+### 监控变量（有前端模式启用）
 
 在 `backend/.env` 文件中配置要监控的变量：
 
 ```env
-MONITOR_VARIABLES=MAIN.Temperature:REAL,MAIN.Pressure:REAL,MAIN.Motor1:BOOL
+# 有前端模式启用
+MONITOR_VARIABLES=MAIN.WaterLevel:REAL, MAIN.Temperature:REAL
 MONITOR_INTERVAL_MS=200
+```
+
+### 数据库配置（有前端模式启用）
+
+在 `backend/.env` 文件中配置数据库：
+
+```env
+# 有前端模式启用
+DB_ENABLED=true
+DB_TYPE=sqlite
+SQLITE_DB_PATH=plc_data.db
+```
+
+### 数据采集配置（有前端模式启用）
+
+在 `backend/.env` 文件中配置数据采集：
+
+```env
+# 有前端模式启用
+DATA_COLLECTION_ENABLED=true
+DATA_COLLECTION_INTERVAL=1000
+DATA_COLLECTION_BATCH_SIZE=10
 ```
 
 ### 阿里云 ASR 配置
