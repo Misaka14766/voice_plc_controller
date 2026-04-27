@@ -16,15 +16,6 @@
 - **多页面设计**：包含语音控制、PLC监控、3D模型、数据可视化、数据库管理、知识库和配置管理页面
 - **数字漫游模式**：支持 3D 模型展示和实验室介绍
 
-## 📹 演示视频
-
-### 前端操作界面演示
-https://github.com/Misaka14766/voice_plc_controller/raw/main/videos/frontend_demo.mp4
-
-### 数字漫游模式演示
-https://github.com/Misaka14766/voice_plc_controller/raw/main/videos/roaming_demo.mp4
-
-
 ## 🎯 两种使用模式
 
 本项目支持两种使用模式，请根据您的需求选择合适的模式：
