@@ -319,9 +319,10 @@ const ModelPanel = {
 
     const animate = () => {
       animationId = requestAnimationFrame(animate)
-      if (model && !isDragging) {
-        model.rotation.y += 0.005
-      }
+      // 自动旋转已关闭
+      // if (model && !isDragging) {
+      //   model.rotation.y += 0.005
+      // }
       renderer.render(scene, camera)
     }
 
